@@ -4,7 +4,7 @@ App para llenar las pautas de mantenimiento de las órdenes de trabajo (OT): mar
 
 - **iPhone / navegador:** https://mantenciontftpuertomlp.github.io/pautas-ot/
   En Safari: Compartir → "Agregar a pantalla de inicio".
-- **Android:** APK entregada por el creador.
+- **Android:** [descargar la APK](https://mantenciontftpuertomlp.github.io/pautas-ot/apk/PautasOT_Ver1.30.apk). Desde la Ver. 1.30 la app avisa sola cuando hay una versión nueva.
 
 Versión de prueba (beta), sin fines de lucro. No recopila datos personales: todo queda en el teléfono de cada persona.
 Creador: Sebastián Padilla – Mantenedor instrumentista.

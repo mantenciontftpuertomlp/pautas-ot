@@ -1,7 +1,8 @@
 "use strict";
 /* Pautas OT — interfaz de la app (Ver. 1.25) */
-const VERSION_APP = "Ver. 1.29";
-const TERMINOS_VER = 1;
+const VERSION_APP = "Ver. 1.30";
+const URL_SITIO = "https://mantenciontftpuertomlp.github.io/pautas-ot/";
+const TERMINOS_VER = 2; // 2: se agrega el uso de internet para buscar actualizaciones (Ver. 1.30)
 
 /* ---------- utilidades ---------- */
 const $ = (s, r=document) => r.querySelector(s);
@@ -657,11 +658,9 @@ function renderSettings(){
       <label class="f">Nombre y apellido</label><input type="text" id="sN" value="${esc(perfil.nombre)}">
       <label class="f">Cargo</label><input type="text" id="sC" value="${esc(perfil.cargo)}">
       <label class="f">Mi firma</label>
-      <button class="sigbox" id="sF" style="margin-top:0">${perfil.firma ? `<img src="${perfil.firma}" alt="Firma">` : '<span class="ph">Toca para firmar</span>'}</button>
-      <div style="font-size:12.5px;color:var(--muted)">Se completan solos en cada OT nueva.</div></div>
+      <button class="sigbox" id="sF" style="margin-top:0">${perfil.firma ? `<img src="${perfil.firma}" alt="Firma">` : '<span class="ph">Toca para firmar</span>'}</button></div>
     <div class="card"><b style="font-size:15px">Defectos frecuentes</b>
-      <div style="font-size:12.5px;color:var(--muted);margin:4px 0 8px">Uno por línea. Aparecen como botones al registrar un defecto.</div>
-      <textarea id="sD" style="min-height:170px">${esc(perfil.defectos.join("\n"))}</textarea></div>
+      <textarea id="sD" style="min-height:170px;margin-top:10px">${esc(perfil.defectos.join("\n"))}</textarea></div>
     <div class="card"><b style="font-size:15px">Al marcar "Sin defecto", Subsecuente o Corrección queda en</b>
       <div class="seg three" style="margin-top:10px">${[["NA","N/A"],["NO","No"],["","Vacío"]].map(([k,l]) => `<button class="ok ${perfil.subDefault===k?"on":""}" data-sd="${k}">${l}</button>`).join("")}</div></div>
     ${htmlEstilo()}
@@ -669,7 +668,11 @@ function renderSettings(){
       <div style="font-size:12.5px;color:var(--muted);margin:4px 0 8px">${terminosOk() ? `Aceptados por ${esc(perfil.terminos.nombre)} el ${esc(perfil.terminos.fecha)}.` : "Sin aceptar."}</div>
       <button class="btn outline" id="sT" style="width:100%">Ver términos de uso</button>
       <button class="btn outline" id="sNov" style="width:100%;margin-top:8px">Novedades por versión</button></div>
+    <div class="card"><b style="font-size:15px">Actualizaciones</b>
+      <div style="font-size:13.5px;margin:4px 0 8px" id="updEstado">Tienes la ${VERSION_APP}.</div>
+      <button class="btn outline" id="sUpd" style="width:100%">Buscar actualización</button></div>
     <div class="ver">Pautas OT · ${VERSION_APP}</div>`;
+  $("#sUpd").onclick = () => buscarActualizacion(true);
   $("#sT").onclick = () => renderTerminos(true);
   enlazarEstilo();
   $("#sNov").onclick = () => mostrarNovedades(true);
@@ -684,6 +687,11 @@ function renderSettings(){
 /* ================= NOVEDADES POR VERSIÓN ================= */
 /* La primera entrada es la versión actual: se muestra una vez al abrir la app tras actualizar. */
 const NOVEDADES = [
+  { v: "Ver. 1.30", fecha: "09-11-2026", items: [
+    "Se agrega la búsqueda de actualizaciones: la app avisa cuando hay una versión nueva y se instala desde el aviso. También en Ajustes → Buscar actualización.",
+    "Para revisar si hay versión nueva, la app consulta la página de la app en GitHub. No envía ningún dato.",
+    "El estilo de visto ✓ parte en Parejo.",
+    "Se quitan textos de ayuda de Ajustes y de la bandeja." ] },
   { v: "Ver. 1.29", fecha: "08-11-2026", items: [
     "Se agrega en Ajustes el estilo de los vistos y X: Parejo, Natural o Máximo, con controles de posición, giro, tamaño y forma del trazo, y vista previa.",
     "Al enviar una OT se guarda el estilo usado: si la reenvías, la imagen sale igual aunque cambies los Ajustes.",
@@ -720,7 +728,7 @@ function revisarNovedades(){ if (terminosOk() && perfil.ultimaVer !== VERSION_AP
 
 /* ================= ESTILO DE VISTOS ================= */
 const ESTILOS = { parejo: {pos:0,rot:0,tam:0,trazo:0}, natural: {pos:55,rot:40,tam:60,trazo:65}, maximo: {pos:100,rot:100,tam:100,trazo:100} };
-if (!perfil.estilo) perfil.estilo = Object.assign({}, ESTILOS.maximo);
+if (!perfil.estilo || !perfil.estiloV){ perfil.estilo = Object.assign({}, ESTILOS.parejo); perfil.estiloV = 1; guardarPerfil(); }
 function fijarEstiloOt(){ if (S && !S.estilo){ S.estilo = Object.assign({}, perfil.estilo); persist(); } }
 function presetDe(e){ return Object.keys(ESTILOS).find(k => ["pos","rot","tam","trazo"].every(c => ESTILOS[k][c] === e[c])) || ""; }
 let muestraSemilla = "muestra";
@@ -735,8 +743,7 @@ function dibujarMuestra(){
 function htmlEstilo(){
   const e = perfil.estilo, pr = presetDe(e);
   const fila = (k, l, txt) => `<div class="sl"><label for="es_${k}">${l}</label><input type="range" id="es_${k}" min="0" max="100" step="5" value="${e[k]}"><output id="eo_${k}">${txt}</output></div>`;
-  return `<div class="card"><b style="font-size:15px">Estilo de los vistos y X</b>
-    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">Cuánto varían de una casilla a otra, para que se vean hechos a mano.</div>
+  return `<div class="card"><b style="font-size:15px;margin-bottom:10px;display:block">Estilo de visto ✓</b>
     <div class="seg three" id="estSeg">${[["parejo","Parejo"],["natural","Natural"],["maximo","Máximo"]].map(([k,l]) => `<button class="ok ${pr===k?"on":""}" data-est="${k}">${l}</button>`).join("")}</div>
     <div style="margin-top:10px">${fila("pos","Posición",Math.round(e.pos*0.22)+" %")}${fila("rot","Giro",Math.round(e.rot*0.18)+"°")}${fila("tam","Tamaño","± "+Math.round(e.tam*0.25)+" %")}${fila("trazo","Forma del trazo",["Igual","Leve","Media","Fuerte"][Math.min(3,Math.round(e.trazo/100*3))])}</div>
     <canvas id="estPrev" style="width:100%;height:92px;border:1px solid #bfc6c8;border-radius:8px;margin-top:8px;display:block"></canvas>
@@ -751,6 +758,58 @@ function enlazarEstilo(){
     const pr = presetDe(e); $$("[data-est]").forEach(b => b.classList.toggle("on", b.dataset.est === pr)); dibujarMuestra(); }; });
   $("#estOtra").onclick = () => { muestraSemilla = "m" + Math.random(); dibujarMuestra(); };
   requestAnimationFrame(dibujarMuestra);
+}
+
+/* ================= ACTUALIZACIONES ================= */
+/* Android: lee version.json del sitio en GitHub; si hay una versión mayor, ofrece bajar e instalar la APK.
+   Web (iPhone): el service worker trae la versión nueva; se ofrece recargar. */
+let updManual = false, swNuevo = false;
+function estadoUpd(t){ const e = $("#updEstado"); if (e) e.textContent = t; }
+function buscarActualizacion(manual){
+  updManual = !!manual;
+  if (NATIVO){
+    if (!manual){ const h = Date.now(), u = +(localStorage.getItem("updVisto") || 0); if (h - u < 20*3600*1000) return; localStorage.setItem("updVisto", String(h)); }
+    if (manual) estadoUpd("Buscando…");
+    try { Android.revisarVersion(URL_SITIO + "version.json"); } catch(e){ if (manual) estadoUpd("Esta APK no puede buscar actualizaciones."); }
+  } else if ("serviceWorker" in navigator){
+    if (manual) estadoUpd("Buscando…");
+    navigator.serviceWorker.getRegistration().then(r => r ? r.update() : null).then(() => setTimeout(() => {
+      if (swNuevo) ofrecerRecarga(); else if (updManual) estadoUpd(`Tienes la última versión (${VERSION_APP}).`);
+    }, 2500)).catch(() => { if (updManual) estadoUpd("Sin conexión. Intenta más tarde."); });
+  }
+}
+window.onVersion = function(txt){
+  if (!txt){ if (updManual) estadoUpd("Sin conexión. Intenta más tarde."); return; }
+  let d; try { d = JSON.parse(txt); } catch(e){ if (updManual) estadoUpd("No se pudo leer la versión publicada."); return; }
+  if (numVer(d.version) > numVer(VERSION_APP)){
+    estadoUpd(`Hay una versión nueva: Ver. ${d.version}.`);
+    const notas = (d.notas || []).map(n => `<li>${esc(n)}</li>`).join("");
+    sheet(`<div class="grab"></div><div class="kick">Actualización disponible</div><h3>Hay una versión nueva: Ver. ${esc(d.version)}</h3>
+      ${notas ? `<ul class="terms" style="margin:0 0 6px">${notas}</ul>` : ""}
+      <div id="updProg" style="display:none"><div style="height:8px;border-radius:4px;background:#E3EAEC;overflow:hidden"><div id="updBar" style="height:8px;width:0;background:var(--pri)"></div></div>
+        <div id="updTxt" style="font-size:12.5px;color:var(--muted);margin-top:6px">Descargando…</div></div>
+      <button class="btn pri big" id="updOk">Actualizar</button><button class="btn outline" data-close>Más tarde</button>`);
+    $("#updOk").onclick = () => { $("#updOk").disabled = true; $("#updProg").style.display = "block"; Android.descargarApk(URL_SITIO + d.apk); };
+  } else if (updManual) estadoUpd(`Tienes la última versión (${VERSION_APP}).`);
+};
+window.onDescarga = function(p){
+  const bar = $("#updBar"), t = $("#updTxt");
+  if (p === -2){ if (t) t.textContent = "No se pudo descargar. Revisa la conexión e intenta de nuevo."; const b = $("#updOk"); if (b) b.disabled = false; return; }
+  if (bar && p >= 0) bar.style.width = p + "%";
+  if (t) t.textContent = p >= 100 ? "Listo. Confirma la instalación en la ventana de Android." : p >= 0 ? `Descargando… ${p} %` : "Descargando…";
+};
+function ofrecerRecarga(){
+  estadoUpd("Hay una versión nueva lista.");
+  sheet(`<div class="grab"></div><div class="kick">Actualización disponible</div><h3>Hay una versión nueva de la app</h3>
+    <button class="btn pri big" id="updRec">Actualizar ahora</button><button class="btn outline" data-close>Más tarde</button>`);
+  $("#updRec").onclick = () => location.reload();
+}
+if (!NATIVO && "serviceWorker" in navigator){
+  navigator.serviceWorker.getRegistration().then(r => { if (!r) return;
+    const vigilar = w => w && w.addEventListener("statechange", () => { if (w.state === "installed" && navigator.serviceWorker.controller){ swNuevo = true; ofrecerRecarga(); } });
+    if (r.waiting && navigator.serviceWorker.controller){ swNuevo = true; }
+    vigilar(r.installing); r.addEventListener("updatefound", () => vigilar(r.installing));
+  });
 }
 
 /* ================= TÉRMINOS DE USO ================= */
@@ -780,7 +839,8 @@ function textoTerminos(){
       "Archivos: abrir el PDF de la OT y guardar el resultado.",
       "Cámara: fotos de hallazgos.",
       "Micrófono: dictar observaciones con el servicio de voz del teléfono (Google).",
-      "Compartir: enviar por WhatsApp u otra aplicación. Esos servicios tienen sus propias políticas."])}
+      "Compartir: enviar por WhatsApp u otra aplicación. Esos servicios tienen sus propias políticas.",
+      "Internet: solo para revisar si hay una versión nueva en la página de la app. No se envía ningún dato."])}
     ${sec("4. Responsabilidades", [
       "Revisa que la pauta esté correcta antes de enviarla. La aplicación ayuda a marcar, pero no valida el trabajo.",
       "Las OT y pautas son documentos internos: compártelas solo por los canales autorizados.",
@@ -820,7 +880,7 @@ function renderTerminos(soloVer){
 }
 
 /* ================= INICIO ================= */
-(async () => { if (!NATIVO){ const h = $("#hintAbrir"); if (h) h.textContent = "En WhatsApp: toca el PDF → Compartir → Guardar en Archivos, y ábrelo aquí"; await IDB.cargar(); } if (terminosOk()){ goHome(); revisarNovedades(); } else renderTerminos(false); })();
+(async () => { if (!NATIVO){ await IDB.cargar(); } if (terminosOk()){ goHome(); revisarNovedades(); setTimeout(() => buscarActualizacion(false), 1500); } else renderTerminos(false); })();
 if (NATIVO){ try { const pend = JSON.parse(Android.paginaLista() || "[]"); if (pend.length) window.onOtRecibida(pend); } catch(e){} }
 window.__app = { get S(){return S;}, get PAGES(){return PAGES;}, get OUTS(){return OUTS;}, openOt, memFiles, changed };
 window.renderPageImageT = renderPageImage;
