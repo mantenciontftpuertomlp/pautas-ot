@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Pautas OT</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#005B70">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pautas OT">
+<link rel="apple-touch-icon" href="icon/icon-180.png">
+<link rel="icon" href="icon/icon-192.png">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+<!-- ================= BANDEJA ================= -->
+<section id="scr-home" class="scr">
+  <header class="hero">
+    <div class="row-sb">
+      <span class="sub" id="homeWeek"></span>
+      <div class="row" style="gap:6px"><span class="verpill" id="verPill">VER 1.29</span>
+      <button class="icon-btn" id="btnAjustes" aria-label="Ajustes">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button></div>
+    </div>
+    <h1>Pautas de mantenimiento</h1>
+    <div class="stats">
+      <div><b id="stPend">0</b><span>Pendientes</span></div>
+      <div><b id="stCurso">0</b><span>En curso</span></div>
+      <div><b id="stEnv">0</b><span>Enviadas</span></div>
+    </div>
+  </header>
+  <div class="body" id="homeList"></div>
+  <footer class="foot">
+    <button class="btn pri big" id="btnAbrir">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6M9 15h6"/></svg>
+      Abrir PDF de OT
+    </button>
+    <div class="hint" id="hintAbrir">O desde WhatsApp: toca el PDF → Compartir → Pautas OT</div>
+  </footer>
+</section>
+
+<!-- ================= OT (PASOS) ================= -->
+<section id="scr-ot" class="scr hidden">
+  <header class="bar">
+    <div class="row">
+      <button class="icon-btn" data-back aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <div class="ttl"><span class="sub" id="otSub"></span><span class="t" id="otTitle"></span></div>
+      <button class="icon-btn" data-home aria-label="Ir al inicio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg></button>
+      <button class="icon-btn" id="btnDoc" aria-label="Ver documento"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+    </div>
+    <div class="stepper" id="stepper"></div>
+  </header>
+  <div class="body" id="stepBody"></div>
+  <footer class="foot" id="stepFoot"></footer>
+</section>
+
+<!-- ================= DOCUMENTO ================= -->
+<section id="scr-doc" class="scr hidden">
+  <header class="bar">
+    <div class="row">
+      <button class="icon-btn" data-back aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <div class="ttl"><span class="sub">Documento</span><span class="t">Marcar sobre la pauta</span></div>
+      <button class="icon-btn" data-home aria-label="Ir al inicio"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg></button>
+    </div>
+  </header>
+  <div class="toolbar" id="toolbar">
+    <button data-tool="auto" class="on">Casillas</button>
+    <button data-tool="check">✓</button>
+    <button data-tool="x">✗</button>
+    <button data-tool="text">Texto</button>
+    <button data-tool="sig">Firma</button>
+    <button data-tool="erase">Borrar</button>
+    <button id="undoBtn" aria-label="Deshacer">↶</button>
+    <button id="zoomOut" aria-label="Alejar">−</button>
+    <button id="zoomIn" aria-label="Acercar">+</button>
+  </div>
+  <div class="tool-hint" id="toolHint"></div>
+  <div class="pages" id="pages"></div>
+</section>
+
+<!-- ================= AJUSTES ================= -->
+<section id="scr-set" class="scr hidden">
+  <header class="bar">
+    <div class="row">
+      <button class="icon-btn" data-back aria-label="Volver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <div class="ttl"><span class="sub">Pautas OT</span><span class="t">Ajustes</span></div>
+    </div>
+  </header>
+  <div class="body" id="setBody"></div>
+</section>
+
+<!-- ================= TÉRMINOS ================= -->
+<section id="scr-terms" class="scr hidden">
+  <header class="hero">
+    <div class="row-sb"><span class="sub">Bienvenido</span><span class="verpill" id="verPill2">VER 1.29</span></div>
+    <h1>Términos de uso</h1>
+    <div style="font-size:13.5px;opacity:.9;margin-top:4px">Pautas OT · versión de prueba (beta)</div>
+  </header>
+  <div class="body" id="termsBody"></div>
+  <footer class="foot" id="termsFoot"></footer>
+</section>
+
+<div id="sheetRoot"></div>
+<div id="busy" class="busy hidden"><div class="spin dark"></div><span id="busyTxt">Procesando…</span></div>
+
+<script src="lib/pdf.min.js"></script>
+<script src="lib/pdf.worker.min.js"></script>
+<script src="motor.js"></script>
+<script src="app.js"></script>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");</script>
+</body>
+</html>
