@@ -688,24 +688,20 @@ function renderSettings(){
 /* La primera entrada es la versión actual: se muestra una vez al abrir la app tras actualizar. */
 const NOVEDADES = [
   { v: "Ver. 1.30", fecha: "09-11-2026", items: [
-    "Se agrega la búsqueda de actualizaciones: la app avisa cuando hay una versión nueva y se instala desde el aviso. También en Ajustes → Buscar actualización.",
-    "Para revisar si hay versión nueva, la app consulta la página de la app en GitHub. No envía ningún dato.",
-    "El estilo de visto ✓ parte en Parejo.",
-    "Se quitan textos de ayuda de Ajustes y de la bandeja." ] },
+    "Incorporación del proyecto a repositorio.",
+    "Verificación de actualización disponible o búsqueda en Android.",
+    "Compatibilidad para iPhone mediante aplicación web (Safari)." ] },
   { v: "Ver. 1.29", fecha: "08-11-2026", items: [
-    "Se agrega en Ajustes el estilo de los vistos y X: Parejo, Natural o Máximo, con controles de posición, giro, tamaño y forma del trazo, y vista previa.",
-    "Al enviar una OT se guarda el estilo usado: si la reenvías, la imagen sale igual aunque cambies los Ajustes.",
-    "Al actualizar se muestran todas las novedades desde la versión que tenías instalada." ] },
+    "Incorporación de botones rápidos de estilos: Parejo, Natural o Máximo, con controles de posición, giro, tamaño y forma del trazo, y vista previa.",
+    "Verificación de versiones anteriores." ] },
   { v: "Ver. 1.28", fecha: "08-11-2026", items: [
-    "Se agrega variabilidad a los vistos y X: posición dentro de la casilla, rotación, tamaño e intensidad de trazo, para que se vean hechos a mano.",
-    "Se agrega variación en la inclinación de la firma.",
-    "Se agrega aviso de novedades al actualizar la app. El historial queda en Ajustes → Novedades por versión." ] },
+    "Se agrega variabilidad a los vistos: offset, rotación, tamaño e intensidad de trazo, para que se vean hechos a mano.",
+    "Se agrega variación de 5° en la inclinación de la firma.",
+    "Se agrega aviso de novedades al actualizar la app, e historial de actualizaciones." ] },
   { v: "Ver. 1.27", fecha: "08-11-2026", items: [
-    "Visto y X estilo bolígrafo.",
-    "Todo lo escrito sobre la hoja va en negro suave, como lápiz pasta.",
-    "Firma más grande: sobresale 40 % arriba y abajo de la casilla." ] },
+    "Estilo de tipografía y aumento de tamaño de firma 40 %, estilo PNG, similar a escritura a mano." ] },
   { v: "Ver. 1.26", fecha: "08-11-2026", items: [
-    "Términos de uso al abrir la app por primera vez. Tu nombre queda como nombre de firma." ] },
+    "Se incorporan los términos de uso de la app." ] },
   { v: "Ver. 1.25", fecha: "08-11-2026", items: [
     "Mejor lectura de pautas: columnas Si/No, PM03, grillas de casillas y tablas que siguen en otra hoja." ] }
 ];

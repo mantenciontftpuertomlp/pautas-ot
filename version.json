@@ -2,9 +2,8 @@
  "version": "1.30",
  "apk": "apk/PautasOT_Ver1.30.apk",
  "notas": [
-  "Se agrega la búsqueda de actualizaciones: la app avisa cuando hay una versión nueva y se instala desde el aviso. También en Ajustes → Buscar actualización.",
-  "Para revisar si hay versión nueva, la app consulta la página de la app en GitHub. No envía ningún dato.",
-  "El estilo de visto ✓ parte en Parejo.",
-  "Se quitan textos de ayuda de Ajustes y de la bandeja."
+  "Incorporación del proyecto a repositorio.",
+  "Verificación de actualización disponible o búsqueda en Android.",
+  "Compatibilidad para iPhone mediante aplicación web (Safari)."
  ]
 }

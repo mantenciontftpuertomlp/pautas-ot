@@ -554,7 +554,7 @@ function drawAnnotations(ctx, P, s, guides){
       if (p.sig){ const im = getImg(p.sig); if (im.complete && im.naturalWidth){
         // grande, como en papel: sobresale 40 % arriba y 40 % abajo de la casilla, centrada y algo inclinada
         const maxH = R.rowH*1.8, maxW = (R.firma.r-R.firma.l)*1.6; let h = maxH, w = h*im.naturalWidth/im.naturalHeight; if (w > maxW){ w = maxW; h = w*im.naturalHeight/im.naturalWidth; }
-        ctx.save(); ctx.translate(((R.firma.l+R.firma.r)/2)*s, y*s); const rf = azar(semilla(OT_SEMILLA + "|firma|" + i)); ctx.rotate((-4 + rf()*4)*Math.PI/180);
+        ctx.save(); ctx.translate(((R.firma.l+R.firma.r)/2)*s, y*s); const rf = azar(semilla(OT_SEMILLA + "|firma|" + i)); ctx.rotate((-4 + rf()*5)*Math.PI/180);
         ctx.drawImage(inkImg(im), -w/2*s, -h/2*s, w*s, h*s); ctx.restore(); } }
     });
   }
