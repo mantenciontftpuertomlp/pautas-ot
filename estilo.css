@@ -78,7 +78,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .it .n{width:28px;height:28px;border-radius:14px;background:#EEF2F6;color:#3E4B5C;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .it.done .n{background:var(--pri);color:#fff}
 .it.def .n{background:#FCE3D2;color:var(--def-ink)}
-.it .c{font-size:12px;color:var(--muted);font-weight:600}
+.it .c{font-size:15px;font-weight:700;color:#075568;line-height:1.25}
 .it .d{font-size:14px}
 .it .x{font-size:12px;color:var(--muted);line-height:1.35}
 .it .x b{color:var(--pri-dk);font-weight:600}
@@ -105,8 +105,8 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .chip.def.on{border-color:var(--def);background:var(--def-soft);color:var(--def-ink)}
 
 label.f{display:block;font-size:12px;color:var(--muted);font-weight:600;margin:10px 0 5px}
-input[type=text],textarea,select{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 12px;background:#fff;font-size:15px}
-input[type=text]:focus,textarea:focus{outline:none;border-color:var(--pri);box-shadow:0 0 0 2px var(--pri-soft)}
+input[type=text],input[type=url],input[type=search],textarea,select{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 12px;background:#fff;font-size:15px}
+input[type=text]:focus,input[type=url]:focus,input[type=search]:focus,textarea:focus{outline:none;border-color:var(--pri);box-shadow:0 0 0 2px var(--pri-soft)}
 textarea{resize:none;min-height:100px}
 .ta-wrap{position:relative}
 .ta-wrap textarea{padding-right:58px}
@@ -188,3 +188,34 @@ label.acepto input{width:22px;height:22px;accent-color:var(--pri);flex:none}
 .bar{padding-top:calc(6px + env(safe-area-inset-top))}
 .foot{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
 .sheet{padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+
+.pauta-op{display:block;width:100%;text-align:left;border:1px solid var(--line);margin-bottom:10px;padding:14px;font:inherit;color:inherit;cursor:pointer}
+.pauta-op .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.pauta-op .top b{font-size:16px;color:var(--pri-dk)}
+.pauta-op .meta{font-size:13px;color:var(--muted);margin-top:4px}
+.pills{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.card .ct{font-size:15px;display:block;margin-bottom:4px}
+.matrow{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;background:#F7F9F9;border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin:6px 0;font:inherit;color:inherit}
+.matrow b{font-size:14px;font-weight:600}.matrow span{font-size:12.5px;color:var(--muted)}
+
+/* biblioteca */
+.bib-src{margin-top:14px}
+.bib-src .hd{display:flex;align-items:center;gap:8px}
+.bib-src .hd b{flex:1;font-size:15px}
+.bib-src .hd .m{font-size:12px;color:var(--muted)}
+.bib-ruta{font-size:12px;color:var(--muted);margin:10px 2px 4px;text-transform:uppercase;letter-spacing:.04em}
+.bib-it{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-top:6px}
+.bib-it span{flex:1;font-size:14px;line-height:1.25;word-break:break-word}
+#bibQ{width:100%;margin-bottom:4px}
+#otSub{cursor:pointer}
+.bib-dir{display:flex;align-items:center;gap:12px;width:100%;padding:14px;margin-top:8px;text-align:left;font-size:15px;font-weight:600;color:var(--ink,#1e2b2e)}
+.bib-dir svg{width:22px;height:22px;fill:none;stroke:#00728D;stroke-width:2;flex:none}
+.bib-dir span{flex:1}
+.bib-dir em{font-style:normal;font-size:13px;color:var(--muted);background:#F3F5F4;border-radius:10px;padding:2px 9px}
+.bib-dir.abierta{background:transparent;border:0;box-shadow:none;padding:6px 2px;color:#075568;font-size:16px}
+.bib-it small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+#verBody{background:#E4E9EA;padding:10px}
+#verBody canvas{display:block;width:100%;height:auto;background:#fff;margin:0 auto 10px;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.bib-it .bt{display:flex;gap:6px;flex:none}
+#verBody.zoom{overflow-x:auto}
+#verBody.zoom canvas{width:220%;max-width:none}

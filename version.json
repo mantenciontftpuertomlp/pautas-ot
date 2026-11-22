@@ -1,9 +1,11 @@
 {
- "version": "1.30",
- "apk": "apk/PautasOT_Ver1.30.apk",
+ "version": "1.31",
+ "apk": "apk/PautasOT_Ver1.31.apk",
  "notas": [
-  "Incorporación del proyecto a repositorio.",
-  "Verificación de actualización disponible o búsqueda en Android.",
-  "Compatibilidad para iPhone mediante aplicación web (Safari)."
+  "Se crea \"Biblioteca de pautas\": agrega el enlace de una carpeta de Google Drive y llena pautas sin necesidad de una OT. En Android también puedes usar una carpeta del teléfono.",
+  "Ver antes de llenar: revisa la pauta antes de elegirla.",
+  "N° de OT: las pautas que no vienen de una OT piden el número para que salga en la hoja.",
+  "OT con varias pautas: la app las reconoce (inspección, mantención o por equipo) y eliges cuál llenar con un botón.",
+  "Cierre del formato nuevo: equipos, materiales, aviso subsecuente, fecha y responsable."
  ]
 }

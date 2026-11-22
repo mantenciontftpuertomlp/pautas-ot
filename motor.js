@@ -307,7 +307,7 @@ function detectBoxes(words, lines, W, excl){
   return null;
 }
 
-function detectEPP(words, W){
+function detectEPP(words, W, lines){
   const sels = words.filter(w => /^Seleccione$/i.test(w.t) || (/^Estado$/i.test(w.t) && sameLine(words, w.y, 3).some(o => /^EPP$/i.test(o.t)))).sort((a,b)=>a.x0-b.x0);
   if (!sels.length) return null;
   const hy = sels[0].y;
@@ -329,7 +329,19 @@ function detectEPP(words, W){
     let lab = label.replace(/\?/g,"").trim();
     if (!lab){ lab = words.filter(w => Math.abs(w.y - n.y) < 10 && w !== n && w.x0 > n.x1 - 1 && w.x1 < lim).sort((a,b)=>a.y-b.y || a.x0-b.x0).map(w=>w.t).join(" ").replace(/\?/g,"").trim(); }
     // ancho de la columna: hasta el siguiente "N°" o el margen
-    rows.push({ key, label: lab, x: cxs, y: n.y, w: Math.max(sel.x1-sel.x0+8, 26), h: rowH });
+    // si bajo "Estado" hay dos celdas (ícono | casilla), el visto va en la casilla de la derecha
+    let x = cxs, wc = Math.max(sel.x1-sel.x0+8, 26);
+    const V = (lines && lines.v) || [];
+    if (V.length){
+      // celdas de la fila que quedan bajo el encabezado "Estado" de esa columna
+      const xs = [...new Set(V.filter(v => v.y0 <= n.y + 1 && v.y1 >= n.y - 1).map(v => Math.round(v.x)))].sort((a,b)=>a-b);
+      const celdas = []; for (let i=0;i<xs.length-1;i++) if (xs[i+1] - xs[i] > 6) celdas.push({ l: xs[i], r: xs[i+1] });
+      const vecino = nextNum || keep.filter(o => o !== n && o.x0 > n.x0 + 60 && Math.abs(o.y - n.y) < 12).sort((a,b)=>a.x0-b.x0)[0];
+      const tope = vecino ? vecino.x0 - 1 : 1e9;
+      const bajo = celdas.filter(c => c.r > sel.x0 - 10 && c.l < sel.x1 + 10 && c.r - c.l < 70 && c.r <= tope + 1);
+      if (bajo.length >= 2){ const c = bajo[bajo.length-1]; x = (c.l + c.r)/2; wc = c.r - c.l - 2; }
+    }
+    rows.push({ key, label: lab, x, y: n.y, w: wc, h: rowH });
   }
   rows.sort((a,b)=>(+a.key)-(+b.key));
   return rows.length ? { rows } : null;
@@ -398,6 +410,105 @@ function detectOtBox(words){
   return ot ? { x: ot.x1 + 6, base: ot.base, fh: ot.fh } : null;
 }
 
+/* ============ Varias pautas en una OT (Ver. 1.30.1) ============ */
+/* Título de la pauta: lo escrito bajo "Actividad de Mantenimiento:" (ej. "INSP 28D INST PORTALÓN") */
+function tituloPauta(words){
+  const i = words.findIndex((w,k) => /^Actividad$/i.test(w.t) && words[k+1] && /^de$/i.test(words[k+1].t) && words[k+2] && /^Mantenimiento:?$/i.test(words[k+2].t));
+  if (i < 0) return "";
+  const a = words[i];
+  // etiquetas de la misma línea agrupadas en frases (Frecuencia | Actividad de Mantenimiento | Especialidad…)
+  const lab = sameLine(words, a.y, 2), fr = [];
+  lab.forEach(w => { const f = fr[fr.length-1]; if (f && w.x0 - f.x1 < 12){ f.x1 = w.x1; f.ws.push(w); } else fr.push({ x0: w.x0, x1: w.x1, ws: [w] }); });
+  const mia = fr.find(f => f.ws.includes(a)), cen = f => (f.x0 + f.x1)/2;
+  const cand = words.filter(w => w.y > a.y + 4 && w.y < a.y + 24);
+  if (!cand.length) return "";
+  const y0 = Math.min(...cand.map(w=>w.y));
+  return cand.filter(w => Math.abs(w.y - y0) < 3).filter(w => { const c = (w.x0 + w.x1)/2; let best = fr[0]; fr.forEach(f => { if (Math.abs(cen(f) - c) < Math.abs(cen(best) - c)) best = f; }); return best === mia; })
+    .sort((p,q)=>p.x0-q.x0).map(w=>w.t).join(" ").trim();
+}
+/* Operaciones de la OT (hoja SAP): número y descripción, para distinguir pautas repetidas */
+function operacionesOT(words){
+  const h = words.find((w,k) => /^Operaci[oó]n$/i.test(w.t) && k > 0 && /^Desc\.?$/i.test(words[k-1].t));
+  if (!h) return [];
+  const d = words[words.indexOf(h) - 1], per = sameLine(words, h.y, 2).find(w => /^Per\.?$/i.test(w.t) && w.x0 > h.x1);
+  const xr = per ? per.x0 - 2 : h.x1 + 120;
+  return words.filter(w => /^\d{4}$/.test(w.t) && w.x0 < 90 && w.y > h.y + 4 && w.y < h.y + 160).map(o => ({
+    op: o.t, desc: words.filter(w => Math.abs(w.y - o.y) < 2.5 && w.x0 >= d.x0 - 3 && w.x1 <= xr).sort((p,q)=>p.x0-q.x0).map(w=>w.t).join(" ").trim() }));
+}
+/* Tipo de pauta según el comienzo del título */
+function tipoPauta(t){
+  let s = sinTilde(String(t||"")).toLowerCase();
+  s = s.replace(/^(\d+d\s+)+/, "");
+  const M = [[/^insp/, "inspección"], [/^mant/, "mantención"], [/^rest/, "restauración"], [/^camb/, "cambio"], [/^lub/, "lubricación"], [/^repa/, "reparación"], [/^revi/, "revisión"], [/^leva/, "levantamiento"]];
+  for (const [re, n] of M) if (re.test(s)) return n;
+  return "";
+}
+/* Valores de la cabecera "1. Alcance general": Área, TAG y nombre del equipo */
+function camposAlcance(words){
+  const tag = words.find((w,k) => /^TAG$/.test(w.t) && words[k+1] && /^Equipo\(s\):?$/i.test(words[k+1].t));
+  if (!tag) return null;
+  const ln = sameLine(words, tag.y, 2).sort((a,b)=>a.x0-b.x0);
+  const anc = [];
+  const add = (k, i0, i1) => { if (i0 >= 0) anc.push({ k, c: (ln[i0].x0 + ln[Math.min(i1, ln.length-1)].x1)/2 }); };
+  const idx = re => ln.findIndex(w => re.test(w.t));
+  add("planta", idx(/^Planta$/i), idx(/^Planta$/i));
+  add("area", idx(/^[ÁA]rea$/i), idx(/^[ÁA]rea$/i));
+  const iD = idx(/^Descripci[oó]n$/i); add("proceso", iD, iD + 3);
+  const iT = ln.indexOf(tag); add("tag", iT, iT + 1);
+  const iN = idx(/^Nombre$/i); add("equipo", iN, iN + 3);
+  const vals = words.filter(w => w.y > tag.y + 5 && w.y < tag.y + 22);
+  if (!vals.length || anc.length < 3) return null;
+  const y0 = Math.min(...vals.map(w=>w.y)), out = {};
+  vals.filter(w => w.y - y0 < 9).sort((a,b)=> Math.abs(a.y-b.y) > 2 ? a.y-b.y : a.x0-b.x0).forEach(w => {
+    const c = (w.x0 + w.x1)/2; let best = anc[0]; anc.forEach(a => { if (Math.abs(a.c - c) < Math.abs(best.c - c)) best = a; });
+    out[best.k] = ((out[best.k] || "") + " " + w.t).trim();
+  });
+  return out;
+}
+/* Tablas del final de la pauta nueva: 3.5 Equipos donde aplica, 3.6 Materiales, 4. Análisis y mejoramiento, 6. Control de revisiones */
+function detectFinales(words, W, lines){
+  if (!lines || !lines.length) return null;
+  const V = lines.v || [];
+  const lineTxt = w => sameLine(words, w.y, 2).sort((a,b)=>a.x0-b.x0).map(x=>x.t).join(" ");
+  const titulo = re => words.find(w => w.x0 < W*0.15 && /^\d(\.\d)?\.?$/.test(w.t) && re.test(lineTxt(w)));
+  const hys = (y0, y1, xm) => { const ys = lines.filter(l => xm >= l.x0 - 0.5 && xm <= l.x1 + 0.5 && l.x1 - l.x0 > W*0.3 && l.y > y0 && l.y < y1).map(l=>l.y).sort((a,b)=>a-b);
+    const u = []; ys.forEach(y => { if (!u.length || y - u[u.length-1] > 2) u.push(y); }); return u; };
+  const columnas = (yh, hdr) => {
+    const xs = [...new Set(V.filter(v => v.y0 <= yh + 1 && v.y1 >= yh - 1).map(v => Math.round(v.x)))].sort((a,b)=>a-b);
+    const cols = []; for (let i=0;i<xs.length-1;i++) if (xs[i+1] - xs[i] > 8) cols.push({ l: xs[i], r: xs[i+1] });
+    cols.forEach(c => { c.label = hdr.filter(w => (w.x0+w.x1)/2 > c.l && (w.x0+w.x1)/2 < c.r).map(w=>w.t).join(" "); });
+    return cols;
+  };
+  // tabla con encabezado arriba: filas desde el encabezado hasta el próximo título
+  const tabla = (tRe, keyRe, maxFilas) => {
+    const t = titulo(tRe); if (!t) return null;
+    const key = words.find(w => keyRe.test(w.t) && w.y > t.y + 4 && w.y < t.y + 45); if (!key) return null;
+    const hdr = sameLine(words, key.y, 2), cols = columnas(key.y, hdr); if (cols.length < 2) return null;
+    const xm = (cols[0].l + cols[cols.length-1].r)/2;
+    const u = hys(key.y - 15, key.y + 300, xm), filas = [];
+    const i0 = u.findIndex(y => y > key.y); if (i0 < 0) return null;
+    for (let i=i0;i<u.length-1 && filas.length < (maxFilas||12);i++){ const h = u[i+1] - u[i]; if (h < 6 || h > 30) break; filas.push({ top: u[i], bot: u[i+1] }); }
+    return filas.length ? { cols, filas } : null;
+  };
+  const out = {};
+  const eq = tabla(/Equipos.*Donde\s+Aplica/i, /^TAG$/); if (eq) out.eq = eq;
+  const mat = tabla(/Lista\s+de\s+Materiales/i, /^Cantidad$/i); if (mat) out.mat = mat;
+  const ana = tabla(/AN[AÁ]LISIS\s+Y\s+MEJORAMIENTO/i, /^Aviso$/i); if (ana) out.ana = ana;
+  // 6. Control de revisiones: los nombres de columna van abajo; se llena la primera fila
+  const t6 = titulo(/CONTROL\s+DE\s+REVISIONES/i);
+  if (t6){
+    const lab = words.find(w => /^Prepar[oó]$/i.test(w.t) && w.y > t6.y && w.y < t6.y + 90);
+    if (lab){
+      const hdr = sameLine(words, lab.y, 2), cols = columnas(lab.y, hdr);
+      const xm = (cols.length ? (cols[0].l + cols[cols.length-1].r)/2 : W/2);
+      const u = hys(t6.y + 4, lab.y - 2, xm), filas = [];
+      for (let i=0;i<u.length-1;i++){ const h = u[i+1]-u[i]; if (h >= 6 && h <= 30) filas.push({ top: u[i], bot: u[i+1] }); }
+      if (cols.length >= 3 && filas.length) out.rev = { cols, filas };
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /* ============ Dibujo sobre la página ============ */
 /* visto y X estilo bolígrafo, orgánicos (Ver. 1.28, prueba al máximo).
    Cada marca se sortea con una semilla fija (OT + posición): reenviar la pauta da la misma imagen.
@@ -444,11 +555,25 @@ function _marca(ctx, x, y, size, color, tipo){
 function drawCheck(ctx, x, y, size, color){ _marca(ctx, x, y, size, color, "v"); }
 function drawX(ctx, x, y, size, color){ _marca(ctx, x, y, size, color, "x"); }
 /* firma teñida del color de tinta (las firmas antiguas se guardaron en otro tono) */
-function inkImg(im){
-  if (im._ink) return im._ink;
-  const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight;
-  const g = c.getContext("2d"); g.drawImage(im, 0, 0); g.globalCompositeOperation = "source-in"; g.fillStyle = COLOR.ink; g.fillRect(0, 0, c.width, c.height);
-  im._ink = c; return c;
+function inkImg(im, tw, th){
+  if (!im._ink){
+    const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight;
+    const g = c.getContext("2d"); g.drawImage(im, 0, 0); g.globalCompositeOperation = "source-in"; g.fillStyle = COLOR.ink; g.fillRect(0, 0, c.width, c.height);
+    im._ink = c; im._sz = {};
+  }
+  if (!tw || tw >= im._ink.width * 0.75) return im._ink;
+  const key = Math.round(tw) + "x" + Math.round(th); if (im._sz[key]) return im._sz[key];
+  // achicar por mitades (no de un salto) para que los trazos finos no se corten
+  let src = im._ink;
+  while (src.width / 2 >= tw * 1.4){
+    const h = document.createElement("canvas"); h.width = Math.max(1, Math.round(src.width/2)); h.height = Math.max(1, Math.round(src.height/2));
+    const g = h.getContext("2d"); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high"; g.drawImage(src, 0, 0, h.width, h.height); src = h;
+  }
+  const out = document.createElement("canvas"); out.width = Math.max(1, Math.round(tw)); out.height = Math.max(1, Math.round(th));
+  const g = out.getContext("2d"); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high"; g.drawImage(src, 0, 0, out.width, out.height);
+  // trazo un poco más firme, como lápiz pasta
+  try { const d = g.getImageData(0, 0, out.width, out.height), a = d.data; for (let i = 3; i < a.length; i += 4) a[i] = Math.min(255, a[i] * 1.8); g.putImageData(d, 0, 0); } catch(e){}
+  im._sz[key] = out; return out;
 }
 function wrap(ctx, text, maxW){
   const words = String(text).split(/\s+/).filter(Boolean), lines=[]; let cur="";
@@ -462,7 +587,7 @@ function fitText(ctx, text, x, y, maxW, s, sizePt, color, align="left", bold=fal
   ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = "middle"; ctx.fillText(text, x*s, y*s);
 }
 
-function drawAnnotations(ctx, P, s, guides){
+function drawAnnotations(ctx, P, s, guides, final){
   OT_SEMILLA = String(S.ot || S.file || "");
   fijarEstilo(S.estilo || (typeof perfil !== "undefined" && perfil.estilo));
   ctx.save();
@@ -519,6 +644,7 @@ function drawAnnotations(ctx, P, s, guides){
   if (P.obs && P.obs.flujo){
     // muchas filas angostas: cada observación ocupa las filas que necesite
     const o = P.obs, ents = obsEntries(); let fi = 0;
+    if (final && !ents.length) ents.push({ item:"", text:"Sin observaciones" });
     ctx.font = `${7*s}px Arial, Helvetica, sans-serif`;
     for (const e of ents){
       if (fi >= o.filas.length) break;
@@ -530,6 +656,7 @@ function drawAnnotations(ctx, P, s, guides){
   }
   else if (P.obs){
     const o = P.obs, ents = obsEntries();
+    if (final && !ents.length) ents.push({ item:"", text:"Sin observaciones" });
     const rowsOut = ents.slice(0, o.n);
     if (ents.length > o.n){ const rest = ents.slice(o.n-1); rowsOut[o.n-1] = { item: rest.map(e=>e.item).filter(Boolean).join(", "), text: rest.map(e => (e.item?`[${e.item}] `:"") + e.text).join(" · ") }; }
     rowsOut.forEach((e,i) => {
@@ -555,14 +682,33 @@ function drawAnnotations(ctx, P, s, guides){
         // grande, como en papel: sobresale 40 % arriba y 40 % abajo de la casilla, centrada y algo inclinada
         const maxH = R.rowH*1.8, maxW = (R.firma.r-R.firma.l)*1.6; let h = maxH, w = h*im.naturalWidth/im.naturalHeight; if (w > maxW){ w = maxW; h = w*im.naturalHeight/im.naturalWidth; }
         ctx.save(); ctx.translate(((R.firma.l+R.firma.r)/2)*s, y*s); const rf = azar(semilla(OT_SEMILLA + "|firma|" + i)); ctx.rotate((-4 + rf()*5)*Math.PI/180);
-        ctx.drawImage(inkImg(im), -w/2*s, -h/2*s, w*s, h*s); ctx.restore(); } }
+        ctx.drawImage(inkImg(im, w*s, h*s), -w/2*s, -h/2*s, w*s, h*s); ctx.restore(); } }
     });
+  }
+  if (P.fin && typeof finDatos === "function"){
+    const F = P.fin, D = finDatos(P.grupo), celda = (f, c, txt, center) => { if (!txt) return; const y = (f.top + f.bot)/2;
+      fitText(ctx, String(txt), center ? (c.l + c.r)/2 : c.l + 3, y, c.r - c.l - 6, s, Math.min(7.5, (f.bot - f.top)*0.75), COLOR.blue, center ? "center" : "left"); };
+    const col = (T, re) => T.cols.find(c => re.test(sinTilde(c.label)));
+    if (F.eq && D.eq){ const f = F.eq.filas[0];
+      celda(f, col(F.eq, /^Area/i) || F.eq.cols[0], D.eq.area, true);
+      celda(f, col(F.eq, /^Descrip/i) || F.eq.cols[1], D.eq.desc);
+      const ct = col(F.eq, /^TAG/i); if (ct) celda(f, ct, D.eq.tag, true); }
+    if (F.mat && D.mat) D.mat.slice(0, F.mat.filas.length).forEach((m, i) => { const f = F.mat.filas[i];
+      const ci = col(F.mat, /^Item/i); if (ci) celda(f, ci, String(i+1), true);
+      [[/^Componente/i, m.comp], [/^Descrip/i, m.desc], [/^Cantidad/i, m.cant, 1], [/^Un/i, m.un, 1], [/^Lote/i, m.lote, 1]].forEach(([re, v, c]) => { const cc = col(F.mat, re); if (cc) celda(f, cc, v, c); }); });
+    if (F.ana && D.ana){ const ents = D.ana;
+      ents.slice(0, F.ana.filas.length).forEach((e, i) => { const f = F.ana.filas[i];
+        const ca = col(F.ana, /^Aviso/i), co = col(F.ana, /^Observ/i);
+        if (ca) celda(f, ca, e.aviso, true); if (co) celda(f, co, (e.item ? "Ítem " + e.item + ": " : "") + (e.text || "")); }); }
+    if (F.rev && D.rev){ const f = F.rev.filas[0];
+      const cf = col(F.rev, /^Fecha/i), cp = col(F.rev, /^Prepar/i);
+      if (cf) celda(f, cf, D.rev.fecha, true); if (cp) celda(f, cp, D.rev.preparo, true); }
   }
   for (const a of S.free.filter(a => a.page === P.n)){
     if (a.type === "check") drawCheck(ctx, a.x*s, a.y*s, a.size*s, a.color||COLOR.blue);
     else if (a.type === "x") drawX(ctx, a.x*s, a.y*s, a.size*s, a.color||COLOR.red);
     else if (a.type === "text"){ ctx.font = `${a.size*s}px Arial, Helvetica, sans-serif`; ctx.fillStyle=COLOR.blue; ctx.textAlign="left"; ctx.textBaseline="middle"; String(a.text).split("\n").forEach((l,j)=>ctx.fillText(l, a.x*s, (a.y + j*a.size*1.15)*s)); }
-    else if (a.type === "sig"){ const im = getImg(a.sig); if (im.complete && im.naturalWidth){ const w=a.w, h=w*im.naturalHeight/im.naturalWidth; ctx.drawImage(inkImg(im), (a.x-w/2)*s, (a.y-h/2)*s, w*s, h*s); } }
+    else if (a.type === "sig"){ const im = getImg(a.sig); if (im.complete && im.naturalWidth){ const w=a.w, h=w*im.naturalHeight/im.naturalWidth; ctx.drawImage(inkImg(im, w*s, h*s), (a.x-w/2)*s, (a.y-h/2)*s, w*s, h*s); } }
   }
   ctx.restore();
 }

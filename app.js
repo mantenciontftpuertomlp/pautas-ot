@@ -1,6 +1,6 @@
 "use strict";
 /* Pautas OT — interfaz de la app (Ver. 1.25) */
-const VERSION_APP = "Ver. 1.30";
+const VERSION_APP = "Ver. 1.31";
 const URL_SITIO = "https://mantenciontftpuertomlp.github.io/pautas-ot/";
 const TERMINOS_VER = 2; // 2: se agrega el uso de internet para buscar actualizaciones (Ver. 1.30)
 
@@ -53,6 +53,7 @@ function guardarPerfil(){ LS.set("perfil", perfil); }
 
 const COLOR = { blue:"#1e1e1e", red:"#1e1e1e", white:"#ffffff", ink:"#1e1e1e" }; // marcas sobre el PDF: negro suave, como lápiz pasta (Ver. 1.27)
 let PDF = null, PAGES = [], S = null, FILE = null, META = null;
+let PAGES_ALL = [], GRUPOS = [], ACTIVO = 0; // varias pautas en una OT (inspección, mantención…)
 let STEPS = [], step = 0;
 const imgCache = new Map();
 let undoStack = [];
@@ -74,12 +75,18 @@ function persist(){
   const p = progreso();
   if (META.estado !== "enviada" || p.tocado) { if (META.estado !== "enviada") META.estado = p.tocado ? "curso" : "pendiente"; }
   META.done = p.done; META.total = p.total;
+  if (META.grupos && META.grupos.length > 1){
+    if (ACTIVO != null && META.grupos[ACTIVO]){ const G = META.grupos[ACTIVO]; G.done = p.done; G.total = p.total; if (G.estado !== "enviada") G.estado = p.tocado ? "curso" : "pendiente"; }
+    const est = META.grupos.map(G => G.estado);
+    META.estado = est.every(e => e === "enviada") ? "enviada" : est.some(e => e !== "pendiente") ? "curso" : "pendiente";
+    META.done = META.grupos.reduce((a,G) => a + (G.done||0), 0); META.total = META.grupos.reduce((a,G) => a + (G.total||0), 0);
+  }
   LS.set(metaKey(FILE), META);
 }
 function progreso(){
   const rows = allRows(); let done = 0;
   rows.forEach(({p, key}) => { const c = S.checks[key]; if (c && c.estado && (c.sub || !subCols(p).length)) done++; });
-  const tocado = Object.keys(S.checks).length > 0 || Object.keys(S.epp).length > 0 || Object.keys(S.boxes||{}).length > 0 || S.free.length > 0;
+  const tocado = rows.some(({key}) => S.checks[key]) || allEpp().some(({key}) => S.epp[key]) || allBoxes().some(({key}) => (S.boxes||{})[key]) || S.free.some(a => PAGES.some(P => P.n === a.page));
   return { done, total: rows.length, tocado };
 }
 
@@ -89,8 +96,14 @@ window.atras = function(){
   if ($("#sheetRoot").firstChild){ closeSheet(); return true; }
   if (!$("#busy").classList.contains("hidden")) return true;
   if (!$("#scr-doc").classList.contains("hidden")){ show("scr-ot"); renderStep(); return true; }
-  if (!$("#scr-ot").classList.contains("hidden")){ if (step > 0){ step--; renderStep(); } else { persist(); goHome(); } return true; }
+  if (!$("#scr-ot").classList.contains("hidden")){
+    if (ACTIVO != null && step > 0){ step--; renderStep(); }
+    else if (ACTIVO != null && GRUPOS.length > 1){ persist(); ACTIVO = null; renderSelector(); }
+    else { persist(); goHome(); }
+    return true; }
   if (!$("#scr-set").classList.contains("hidden")){ goHome(); return true; }
+  if (!$("#scr-ver").classList.contains("hidden")){ cerrarVista(); show("scr-bib"); renderBib(); return true; }
+  if (!$("#scr-bib").classList.contains("hidden")){ if (BIB.dir){ const P = BIB.dir.ruta; BIB.dir = P.includes(" / ") ? { fid: BIB.dir.fid, ruta: P.slice(0, P.lastIndexOf(" / ")) } : null; renderBib(); } else goHome(); return true; }
   if (!$("#scr-terms").classList.contains("hidden") && terminosOk()){ show("scr-set"); renderSettings(); return true; }
   return false;
 };
@@ -106,7 +119,7 @@ function semana(){
   return `Semana ${w} · ${dias[d.getDay()]} ${d.getDate()}`;
 }
 function goHome(){
-  PDF = null; FILE = null; S = null; META = null;
+  PDF = null; FILE = null; S = null; META = null; PAGES_ALL = []; GRUPOS = []; ACTIVO = 0;
   show("scr-home"); renderHome();
 }
 function renderHome(){
@@ -123,13 +136,18 @@ function renderHome(){
   }
   const card = ({f, m}) => {
     const est = (m && m.estado) || "pendiente";
-    const pill = est === "enviada" ? `<span class="pill env">Enviada</span>` : est === "curso" ? `<span class="pill curso">En curso${m.total?` · ${m.done}/${m.total}`:""}</span>` : `<span class="pill">Pendiente</span>`;
+    const nEnv = m && m.grupos ? m.grupos.filter(G => G.estado === "enviada").length : 0;
+    const pill = m && m.grupos && m.grupos.length > 3
+      ? `<span class="pill ${nEnv === m.grupos.length ? "env" : nEnv || m.grupos.some(G => G.estado === "curso") ? "curso" : ""}">${nEnv} de ${m.grupos.length} pautas enviadas</span>`
+      : m && m.grupos && m.grupos.length > 1
+      ? `<span class="pills">${m.grupos.map(G => `<span class="pill ${G.estado==="enviada"?"env":G.estado==="curso"?"curso":""}">${esc((G.nombre || G.tipo || "pauta").replace(/^./, c => c.toUpperCase()))}${G.estado==="enviada"?" ✓":G.estado==="curso"&&G.total?` ${G.done}/${G.total}`:""}</span>`).join("")}</span>`
+      : est === "enviada" ? `<span class="pill env">Enviada</span>` : est === "curso" ? `<span class="pill curso">En curso${m.total?` · ${m.done}/${m.total}`:""}</span>` : `<span class="pill">Pendiente</span>`;
     const title = m && (m.equipo || m.desc) ? (m.equipo || m.desc) : f.name.replace(/\.pdf$/i,"");
     const sub = m ? [m.equipo ? m.desc : "", m.fecha].filter(Boolean).join(" · ") : "Toca para abrir";
     const bar = est === "curso" && m.total ? `<div class="bar6"><i style="width:${Math.round(100*m.done/m.total)}%"></i></div>` : "";
     return `<div class="card" style="padding:0;display:flex">
       <button class="otc" data-open="${esc(f.name)}" style="border:0;background:transparent;padding:14px;flex:1">
-        <div class="top"><span class="num">${m && m.ot ? "OT " + esc(m.ot) : "OT"}</span>${pill}</div>
+        <div class="top"><span class="num">${m && m.ot ? "OT " + esc(m.ot) : m && m.sola ? "OT sin número" : "OT"}</span>${pill}</div>
         <div class="name">${esc(title)}</div><div class="meta">${esc(sub)}</div>${bar}
       </button>
       <button class="icon-btn" data-menu="${esc(f.name)}" aria-label="Opciones" style="color:var(--muted);margin:6px 4px 0 0"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/></svg></button>
@@ -165,6 +183,197 @@ window.onOtRecibida = function(names){
   else { goHome(); toast(`${names.length} OTs recibidas`); }
 };
 
+/* ================= BIBLIOTECA DE PAUTAS ================= */
+/* fuentes: carpeta del teléfono o enlace (carpeta pública de Google Drive, archivo de Drive o PDF directo).
+   La lista se guarda para verla sin señal; el PDF se trae recién al tocar "Llenar" y queda en el teléfono. */
+const NAT = { n: 0, esp: {} };
+/* versión web (iPhone): lo mismo con fetch; solo funciona con la API de Drive (Google permite leerla desde la página) */
+const NATW = {
+  async bajar(url){ let r; try { r = await fetch(url); } catch(e){ throw new Error("Sin conexión o Drive no permitió la lectura"); }
+    if (!r.ok){ let m = ""; try { m = (await r.json()).error.message; } catch(e){} throw new Error(r.status === 404 ? "No se encontró: revisa que esté compartido con cualquiera con el enlace" : "Drive: " + (m || "error " + r.status)); }
+    return r; },
+  async bibTexto(url){ return (await this.bajar(url)).text(); },
+  async bytes(url){ const u = new Uint8Array(await (await this.bajar(url)).arrayBuffer()); if (!(u[0]===37 && u[1]===80 && u[2]===68 && u[3]===70)) throw new Error("El archivo no es un PDF"); return u; },
+  async bibVer(url){ const u = await this.bytes(url); NATW.vista = { url, u }; let s = ""; for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768)); return btoa(s); },
+  async bibTraer(url, nombre){ const u = NATW.vista && NATW.vista.url === url ? NATW.vista.u : await this.bytes(url);
+    const d = new Date(), p = n => String(n).padStart(2, "0"), base = (nombre || "Pauta").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
+    let n = `Bib_${base}_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.pdf`, k = 2; while (memFiles[n]) n = n.replace(/(_\d+)?\.pdf$/, "_" + (k++) + ".pdf");
+    const blob = new Blob([u], { type: "application/pdf" }); memFiles[n] = { b64: await blobToB64(blob), t: Date.now() }; await IDB.poner(n, memFiles[n]); return n; }
+};
+function nat(metodo, ...args){
+  if (!NATIVO) return NATW[metodo] ? NATW[metodo](...args) : Promise.reject(new Error("No disponible en esta versión"));
+  return new Promise((res, rej) => { const id = "r" + (++NAT.n); NAT.esp[id] = { res, rej }; try { Android[metodo](id, ...args); } catch(e){ delete NAT.esp[id]; rej(e); } }); }
+/* llave de la API de Drive (restringida a la página de la app y solo a Drive) */
+const DRIVE_KEY = "AIzaSyDC-9kxJPYyKu0AHPi2dHvkn3vdX7hADcg", DAPI = "https://www.googleapis.com/drive/v3/files";
+async function listarDriveApi(id, ruta, nivel, out){
+  let tok = "";
+  do {
+    const q = encodeURIComponent(`'${id}' in parents and trashed=false`);
+    const j = JSON.parse(await nat("bibTexto", `${DAPI}?q=${q}&fields=nextPageToken,files(id,name,mimeType)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&key=${DRIVE_KEY}${tok ? "&pageToken=" + tok : ""}`));
+    for (const f of j.files || []){
+      if (f.mimeType === "application/vnd.google-apps.folder"){ if (nivel < 3) await listarDriveApi(f.id, ruta ? ruta + " / " + f.name : f.name, nivel + 1, out); }
+      else out.push({ nombre: f.name, ruta, ref: "drive:" + f.id, pdf: f.mimeType === "application/pdf" || /\.pdf$/i.test(f.name) });
+    }
+    tok = j.nextPageToken || "";
+  } while (tok);
+}
+window.onNat = function(id, ok, dato){ const p = NAT.esp[id]; if (!p) return; delete NAT.esp[id]; ok ? p.res(dato) : p.rej(new Error(dato || "error")); };
+const BIB = { get fuentes(){ return LS.get("bib.fuentes", []); }, set fuentes(v){ LS.set("bib.fuentes", v); }, q: "", cargando: {} };
+const driveId = u => { const m = u.match(/\/folders\/([\w-]{10,})/) || u.match(/\/file\/d\/([\w-]{10,})/) || u.match(/[?&]id=([\w-]{10,})/); return m ? m[1] : ""; };
+const driveTipo = u => /\/folders\/|embeddedfolderview|drive\/u\/\d+\/folders/.test(u) ? "carpeta" : /\/file\/d\/|[?&]id=/.test(u) && /google\./.test(u) ? "archivo" : "";
+function desHtml(t){ const e = document.createElement("textarea"); e.innerHTML = t.replace(/<[^>]+>/g, ""); return e.value.trim(); }
+function parseDrive(html){
+  const out = [], re = /id="entry-([\w-]+)"[\s\S]*?href="([^"]+)"[\s\S]*?class="flip-entry-title"[^>]*>([\s\S]*?)<\/div>/g; let m;
+  while ((m = re.exec(html))) out.push({ id: m[1], nombre: desHtml(m[3]), carpeta: /\/folders\//.test(m[2]) });
+  return out;
+}
+async function listarDrive(id, ruta, nivel, out){
+  const html = await nat("bibTexto", "https://drive.google.com/embeddedfolderview?id=" + id);
+  if (!/flip-entry|flip-entries/.test(html)){ if (nivel === 0) throw new Error("La carpeta no es pública o el enlace no es válido"); return; }
+  for (const e of parseDrive(html)){
+    if (e.carpeta){ if (nivel < 2) await listarDrive(e.id, ruta ? ruta + " / " + e.nombre : e.nombre, nivel + 1, out); }
+    else out.push({ nombre: e.nombre, ruta, ref: "drive:" + e.id, pdf: /\.pdf$/i.test(e.nombre) });
+  }
+}
+async function refrescarFuente(f){
+  BIB.cargando[f.id] = true; renderBib();
+  try {
+    let items = [];
+    if (f.tipo === "carpeta") items = JSON.parse(await nat("bibCarpeta", f.ref)).map(x => Object.assign(x, { pdf: true }));
+    else if (f.tipo === "drive"){
+      try { await listarDriveApi(f.ref, "", 0, items); if (!items.length && NATIVO) await listarDrive(f.ref, "", 0, items = []); }
+      catch(e){ if (!NATIVO) throw e; items = []; await listarDrive(f.ref, "", 0, items); }
+    }
+    else items = [{ nombre: f.nombre, ruta: "", ref: f.ref, pdf: true }];
+    LS.set("bib.lista." + f.id, { t: Date.now(), items });
+  } catch(e){ toast(e.message && e.message !== "error" ? e.message : "No se pudo leer la biblioteca", 4000); }
+  delete BIB.cargando[f.id]; renderBib();
+}
+function abrirBib(){ BIB.dir = null; show("scr-bib"); renderBib(); BIB.fuentes.forEach(f => { const l = LS.get("bib.lista." + f.id, null); if (!l) refrescarFuente(f); }); }
+function renderBib(){
+  const fs = BIB.fuentes, q = BIB.q.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (!fs.length){
+    $("#bibBody").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-2z"/><path d="M10 3h4v18h-4zM14 4l4-1 3 17-4 1z"/></svg>
+      <div><b>Aún no hay bibliotecas</b></div><div style="font-size:14px;margin-top:6px">${NATIVO ? "Agrega una carpeta del teléfono o el enlace de una carpeta de Google Drive" : "Agrega el enlace de una carpeta de Google Drive"} con las pautas de trabajo en PDF.</div></div>`;
+    return;
+  }
+  const norm = t => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  let html = `<input type="search" id="bibQ" placeholder="Buscar pauta…" value="${esc(BIB.q)}">`;
+  fs.filter(f => q || !BIB.dir || BIB.dir.fid === f.id).forEach(f => {
+    const l = LS.get("bib.lista." + f.id, null), items = l ? l.items.filter(x => x.pdf && (!q || norm(x.nombre + " " + x.ruta).includes(q))) : [];
+    const noPdf = l ? l.items.filter(x => !x.pdf).length : 0;
+    const tipo = f.tipo === "carpeta" ? "Carpeta del teléfono" : f.tipo === "drive" ? "Google Drive" : "Enlace";
+    html += `<div class="bib-src"><div class="hd"><div style="flex:1"><b>${esc(f.nombre)}</b><div class="m">${tipo}${l ? ` · ${(n => n + (n === 1 ? " pauta" : " pautas"))(l.items.filter(x=>x.pdf).length)} · actualizada ${new Date(l.t).toLocaleDateString("es-CL")}` : ""}</div></div>
+      ${BIB.cargando[f.id] ? `<div class="spin dark" style="width:18px;height:18px"></div>` : `<button class="btn sm" data-bibup="${f.id}">Actualizar</button>`}
+      <button class="icon-btn" data-bibmenu="${f.id}" aria-label="Opciones" style="color:var(--muted)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/></svg></button></div>`;
+    const it = x => `<div class="card bib-it"><span>${esc(x.nombre.replace(/\.pdf$/i, ""))}${q && x.ruta ? `<small>${esc(x.ruta)}</small>` : ""}</span><div class="bt"><button class="btn sm" data-ver="${esc(f.id)}|${esc(x.ref)}|${esc(x.nombre)}">Ver</button><button class="btn sm pri" data-llenar="${esc(f.id)}|${esc(x.ref)}|${esc(x.nombre)}">Llenar</button></div></div>`;
+    items.sort((a,b) => a.nombre.localeCompare(b.nombre, "es", { numeric: true }));
+    if (q) items.forEach(x => html += it(x));
+    else {
+      const P = BIB.dir && BIB.dir.fid === f.id ? BIB.dir.ruta : "";
+      if (P){ const up = P.includes(" / ") ? P.slice(0, P.lastIndexOf(" / ")) : "";
+        html += `<button class="card bib-dir abierta" data-bibdir="${esc(f.id)}|${esc(up)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span>${esc(P.split(" / ").pop())}</span></button>`; }
+      const sub = {}, aqui = [];
+      items.forEach(x => { const r = x.ruta || "";
+        if (r === P) aqui.push(x);
+        else if (!P || r.startsWith(P + " / ")){ const resto = P ? r.slice(P.length + 3) : r, n = resto.split(" / ")[0]; sub[n] = (sub[n] || 0) + 1; } });
+      Object.keys(sub).sort((a,b) => a.localeCompare(b, "es")).forEach(n => {
+        html += `<button class="card bib-dir" data-bibdir="${esc(f.id)}|${esc(P ? P + " / " + n : n)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>${esc(n)}</span><em>${sub[n]}</em></button>`; });
+      aqui.forEach(x => html += it(x));
+    }
+    if (l && !items.length) html += `<div class="hint" style="margin-top:8px">${q ? "Ninguna pauta coincide con la búsqueda." : "No se encontraron PDF."}</div>`;
+    if (noPdf) html += `<div class="hint" style="margin-top:6px">${noPdf > 1 ? noPdf + " archivos no son PDF y no se muestran." : "1 archivo no es PDF y no se muestra."}</div>`;
+    html += `</div>`;
+  });
+  $("#bibBody").innerHTML = html;
+  const qi = $("#bibQ"); qi.oninput = () => { BIB.q = qi.value; const pos = qi.selectionStart; renderBib(); const n = $("#bibQ"); n.focus(); n.setSelectionRange(pos, pos); };
+}
+$("#bibBody").addEventListener("click", async e => {
+  const dr = e.target.closest("[data-bibdir]"); if (dr){ const [fid, ...r] = dr.dataset.bibdir.split("|"), ruta = r.join("|"); BIB.dir = ruta ? { fid, ruta } : null; renderBib(); $("#bibBody").scrollTop = 0; return; }
+  const up = e.target.closest("[data-bibup]"); if (up){ const f = BIB.fuentes.find(x => x.id === up.dataset.bibup); if (f) refrescarFuente(f); return; }
+  const mn = e.target.closest("[data-bibmenu]");
+  if (mn){ const f = BIB.fuentes.find(x => x.id === mn.dataset.bibmenu); if (!f) return;
+    sheet(`<div class="grab"></div><h3>${esc(f.nombre)}</h3>
+      <button class="btn big" id="bRen">Cambiar nombre</button>
+      <button class="btn big" id="bDel" style="color:var(--def);border-color:#F0C9AE">Quitar biblioteca</button>
+      <div class="hint" style="margin:4px 0 8px">Quitarla no borra las pautas que ya llenaste.</div>
+      <button class="btn big" data-close>Cancelar</button>`);
+    $("#bRen").onclick = () => { closeSheet(); openText("Nombre de la biblioteca", f.nombre, v => { v = v.trim(); if (!v) return; BIB.fuentes = BIB.fuentes.map(x => x.id === f.id ? Object.assign(x, { nombre: v }) : x); renderBib(); }); };
+    $("#bDel").onclick = () => { BIB.dir = null; BIB.fuentes = BIB.fuentes.filter(x => x.id !== f.id); LS.del("bib.lista." + f.id); closeSheet(); renderBib(); };
+    return; }
+  const vv = e.target.closest("[data-ver]");
+  if (vv){ const [fid, ref, ...rest] = vv.dataset.ver.split("|"); verPauta(ref, rest.join("|")); return; }
+  const ll = e.target.closest("[data-llenar]");
+  if (ll){ const [fid, ref, ...rest] = ll.dataset.llenar.split("|"), nombre = rest.join("|"); llenarBib(ref, nombre); }
+});
+const srcBib = ref => ref.startsWith("drive:") ? `${DAPI}/${ref.slice(6)}?alt=media&supportsAllDrives=true&key=${DRIVE_KEY}` : ref;
+const srcBibAlt = ref => ref.startsWith("drive:") && NATIVO ? "https://drive.google.com/uc?export=download&id=" + ref.slice(6) : "";
+async function natBib(metodo, ref, ...mas){ try { return await nat(metodo, srcBib(ref), ...mas); } catch(e){ const alt = srcBibAlt(ref); if (!alt) throw e; return nat(metodo, alt, ...mas); } }
+async function llenarBib(ref, nombre){
+  {
+    if (!terminosOk()){ renderTerminos(false); toast("Acepta los términos para llenar pautas"); return; }
+    busy(true, "Trayendo la pauta…");
+    try { const n = await natBib("bibTraer", ref, nombre); busy(false); openOt(n); }
+    catch(err){ busy(false); toast(err.message && err.message !== "error" ? err.message : "No se pudo traer la pauta", 4000); }
+  }
+}
+/* vista previa: solo lectura, no crea nada en la bandeja */
+let VISTA = null;
+async function verPauta(ref, nombre){
+  busy(true, "Abriendo la pauta…");
+  let doc;
+  try { const b64 = await natBib("bibVer", ref); doc = await pdfjsLib.getDocument({ data: b64ToBytes(b64) }).promise; }
+  catch(err){ busy(false); toast(err.message && err.message !== "error" ? err.message : "No se pudo abrir la pauta", 4000); return; }
+  busy(false);
+  VISTA = { ref, nombre, doc };
+  $("#verTit").textContent = nombre.replace(/\.pdf$/i, "");
+  $("#verSub").textContent = `Vista previa · ${doc.numPages} hoja${doc.numPages > 1 ? "s" : ""} · toca para acercar`;
+  const body = $("#verBody"); body.innerHTML = ""; body.scrollTop = 0;
+  show("scr-ver");
+  const ancho = Math.min(2200, Math.max(320, body.clientWidth - 20) * Math.min(2.5, (window.devicePixelRatio || 1) * 1.3) * 2);
+  body.classList.remove("zoom");
+  for (let n = 1; n <= doc.numPages; n++){
+    if (!VISTA || VISTA.doc !== doc) return;
+    const pg = await doc.getPage(n), vp0 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: ancho / vp0.width });
+    const c = document.createElement("canvas"); c.width = Math.round(vp.width); c.height = Math.round(vp.height); body.appendChild(c);
+    await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+  }
+}
+$("#verBody").addEventListener("click", e => { const c = e.target.closest("canvas"); if (!c) return; const b = $("#verBody"), z = !b.classList.contains("zoom");
+  const fy = (e.clientY - c.getBoundingClientRect().top) / c.clientHeight, fx = (e.clientX - c.getBoundingClientRect().left) / c.clientWidth;
+  b.classList.toggle("zoom", z);
+  if (z){ b.scrollTop = c.offsetTop + fy * c.clientHeight - b.clientHeight / 2; b.scrollLeft = fx * c.clientWidth - b.clientWidth / 2; } else b.scrollTop = c.offsetTop - 10; });
+function cerrarVista(){ if (VISTA){ try { VISTA.doc.destroy(); } catch(e){} } VISTA = null; $("#verBody").innerHTML = ""; }
+$("#verLlenar").onclick = () => { if (!VISTA) return; const { ref, nombre } = VISTA; cerrarVista(); llenarBib(ref, nombre); };
+function agregarFuente(f){ f.id = "b" + Date.now().toString(36); BIB.fuentes = BIB.fuentes.concat([f]); renderBib(); refrescarFuente(f); }
+window.onCarpetaBib = function(uri, nombre){ if (uri) agregarFuente({ tipo: "carpeta", nombre: nombre || "Carpeta", ref: uri }); };
+$("#btnBibAdd").onclick = () => {
+  sheet(`<div class="grab"></div><h3>Agregar biblioteca</h3>
+    <button class="btn big" id="aCarp">Carpeta del teléfono</button>
+    <div class="hint" style="margin:2px 0 10px">Elige una carpeta con pautas en PDF (también lee sus subcarpetas).</div>
+    <label class="f" style="margin-top:0">Enlace de Google Drive</label>
+    <input type="url" id="aUrl" placeholder="https://drive.google.com/drive/folders/…">
+    <label class="f">Nombre (opcional)</label>
+    <input type="text" id="aNom" placeholder="Ej: Pautas instrumentación">
+    <div class="hint" style="margin:4px 0 10px">La carpeta debe estar compartida como "Cualquier persona con el enlace". También sirve el enlace a un solo PDF.</div>
+    <button class="btn pri big" id="aOk">Agregar enlace</button>
+    <button class="btn big" data-close>Cancelar</button>`);
+  if (!NATIVO){ $("#aCarp").style.display = "none"; $("#aCarp").nextElementSibling.style.display = "none"; }
+  $("#aCarp").onclick = () => { closeSheet(); Android.elegirCarpetaBib(); };
+  $("#aOk").onclick = () => {
+    const u = $("#aUrl").value.trim(), nom = $("#aNom").value.trim();
+    if (!/^https?:\/\//i.test(u)){ toast("Pega un enlace que empiece con https://"); return; }
+    const t = driveTipo(u), id = driveId(u);
+    if (t === "carpeta" && id) agregarFuente({ tipo: "drive", nombre: nom || "Biblioteca Drive", ref: id });
+    else if (t === "archivo" && id) agregarFuente({ tipo: "url", nombre: nom || "Pauta Drive", ref: "drive:" + id });
+    else if (/google\./.test(u)){ toast("No reconocí el enlace de Drive"); return; }
+    else agregarFuente({ tipo: "url", nombre: nom || decodeURIComponent(u.split("?")[0].split("/").pop() || "Pauta"), ref: u });
+    closeSheet();
+  };
+};
+$("#btnBib").onclick = () => abrirBib();
+
+
 /* ================= ABRIR OT ================= */
 async function openOt(name){
   busy(true, "Leyendo la OT…");
@@ -173,7 +382,7 @@ async function openOt(name){
     if (!b64) throw new Error("vacío");
     PDF = await pdfjsLib.getDocument({ data: b64ToBytes(b64) }).promise;
   } catch(e){ busy(false); toast("No se pudo abrir el PDF"); console.error(e); return; }
-  FILE = name; PAGES = []; let lines1 = [], words1 = null, W1 = 612;
+  FILE = name; PAGES = []; let lines1 = [], words1 = null, W1 = 612; const OPS = []; let haySAP = false;
   for (let n=1; n<=PDF.numPages; n++){
     const page = await PDF.getPage(n);
     const { words, w, h, lines } = await extractWords(page);
@@ -181,9 +390,11 @@ async function openOt(name){
     if (n === 1){ words1 = words; W1 = w; }
     const text = words.map(x=>x.t).join(" ");
     const esSAP = /ORDEN\s+DE\s+MANTENIMIENTO/i.test(text) || /Orden\s*:\s*\d{5,}/.test(text);
+    if (esSAP) haySAP = true;
     const isPauta = !esSAP && (/Indicar\s+Nro/i.test(text) || /PAUTA\s+DE\s+MANTENIMIENTO/i.test(text) || /ALCANCE\s+GENERAL|EJECUCI[OÓ]N\s+(INSPECCI|MANTENIMIENTO)|Descripci[oó]n\s+Actividades|OBSERVACIONES|CONTROL\s+DE\s+REVISIONES|Nombre\s+y\s+Apellido/i.test(text));
     const P = { n, w, h, isPauta, page };
-    if (isPauta){ const hl = await extractHLines(page); P.otBox = detectOtBox(words); const prevP = PAGES[PAGES.length-1]; P.checklist = detectChecklist(words, w, h, hl, prevP && prevP.isPauta && prevP.checklist ? prevP.checklist : null); P.epp = detectEPP(words, w); P.obs = detectObs(words, w, hl); P.resp = detectResp(words, w);
+    if (esSAP) operacionesOT(words).forEach(o => { if (!OPS.some(x => x.op === o.op)) OPS.push(o); });
+    if (isPauta){ const hl = await extractHLines(page); P.otBox = detectOtBox(words); const prevP = PAGES[PAGES.length-1]; P.checklist = detectChecklist(words, w, h, hl, prevP && prevP.isPauta && prevP.checklist ? prevP.checklist : null); P.epp = detectEPP(words, w, hl); P.obs = detectObs(words, w, hl); P.resp = detectResp(words, w);
       const excl = [];
       if (P.checklist) excl.push({ top: P.checklist.top, bottom: P.checklist.bottom });
       if (P.epp){ const ys = P.epp.rows.map(r=>r.y); excl.push({ top: Math.min(...ys) - 14, bottom: Math.max(...ys) + 6 }); }
@@ -194,10 +405,20 @@ async function openOt(name){
       P.boxes = detectBoxes(words, hl, w, excl);
       const ap = detectAplica(words, hl, w);
       if (ap.length){ P.boxes = P.boxes || { rows: [] }; P.boxes.rows = ap.concat(P.boxes.rows); }
+      P.inicio = /ALCANCE\s+GENERAL\s+(DE\s+)?MANTENIMIENTO/i.test(text);
+      if (P.inicio){ P.titulo = tituloPauta(words); P.campos = camposAlcance(words); }
+      P.fin = detectFinales(words, w, hl);
       if (!P.otBox && hl.ot && hl.ot.length){ const b = hl.ot[0]; P.otBox = { x: b.x0 + 8, base: (b.y0 + b.y1)/2 + 3, fh: 8.5 }; } }
     PAGES.push(P); await ceder();
   }
   if (!PAGES.some(p=>p.isPauta)) PAGES.forEach(p => p.isPauta = true);
+  // cada pauta empieza en la hoja "1. Alcance general mantenimiento"
+  GRUPOS = []; let gi = -1;
+  PAGES.forEach(P => { if (!P.isPauta) return; if (gi < 0 || (P.inicio && GRUPOS[gi].pages.length)){ gi++; GRUPOS.push({ titulo: "", pages: [] }); }
+    P.grupo = gi; GRUPOS[gi].pages.push(P.n); if (P.titulo && !GRUPOS[gi].titulo) GRUPOS[gi].titulo = P.titulo; });
+  GRUPOS.forEach(G => G.tipo = tipoPauta(G.titulo));
+  if (GRUPOS.length > 1 && OPS.length === GRUPOS.length) GRUPOS.forEach((G,i) => G.op = OPS[i]);
+  PAGES_ALL = PAGES; ACTIVO = 0;
 
   // metadatos de la OT
   const all = lines1.join("\n");
@@ -213,35 +434,100 @@ async function openOt(name){
     return words1.filter(w => w.x0 > col.x1 + 1 && w.x1 < limX && w.y > col.y - up && w.y < col.y + down && (!filt || filt(w)))
       .sort((a,b) => Math.abs(a.y-b.y) > 2 ? a.y-b.y : a.x0-b.x0).map(w=>w.t).join(" ").trim();
   };
-  const ot = campo(/^Orden :/, 4, 4, w => /^\d{5,}$/.test(w.t)) || pick(/(\d{7,})\s+PM\d/) || ((name.match(/(\d{6,})/)||[])[1] || "");
+  const ot = campo(/^Orden :/, 4, 4, w => /^\d{5,}$/.test(w.t)) || pick(/(\d{7,})\s+PM\d/) || (/^Bib_/.test(name) ? "" : (name.match(/(\d{6,})/)||[])[1] || "");
   let equipo = campo(/^Denominaci[oó]n equipo :/, 3, 3) || pick(/Denominaci[oó]n\s+equipo\s*:\s*(.+?)(?:\s+Grupo\b|$)/im);
   let desc = campo(/^Descripci[oó]n orden :/, 7, 13);
   if (/^Grupo\b|^:/i.test(equipo) || /^\W*$/.test(equipo)) equipo = "";
   const fecha = pick(/Fecha\s+inicio\s+Programada\s*:\s*([\d.]+)/i);
   const hora = pick(/Hora\s+inicio\s*:\s*(\d{1,2}:\d{2})/i);
   const tc = s => s.toLowerCase().replace(/(^|[\s(-])([a-záéíóúñ])/g, (m,a,b)=>a+b.toUpperCase());
-  META = Object.assign({ estado:"pendiente", done:0, total:0 }, LS.get(metaKey(name), {}), { ot, equipo: equipo ? tc(equipo) : "", desc, fecha: [fecha, hora].filter(Boolean).join(" ") });
+  META = Object.assign({ estado:"pendiente", done:0, total:0 }, LS.get(metaKey(name), {}), { ot, equipo: equipo ? tc(equipo) : "", desc, fecha: [fecha, hora].filter(Boolean).join(" "), sola: !haySAP });
+  if (!haySAP){ const pc = PAGES_ALL.find(p => p.campos), c = (pc && pc.campos) || {}, G0 = GRUPOS[0] || {};
+    META.equipo = META.equipo || (c.equipo ? tc(c.equipo) : ""); META.desc = META.desc || G0.titulo || name.replace(/^Bib_/, "").replace(/_\d{8}-\d{4}\.pdf$|\.pdf$/i, "").replace(/_/g, " "); }
 
   const saved = LS.get(stKey(name), null);
   S = saved ? Object.assign(freshState(), saved) : freshState();
-  S.file = name; if (!S.ot) S.ot = ot;
+  S.file = name; if (!S.ot) S.ot = ot; if (!S.fin) S.fin = {}; META.ot = S.ot;
   if (!S.resp.length) S.resp = [{ nombre: perfil.nombre, cargo: perfil.cargo, sig: perfil.firma }];
+  META.grupos = GRUPOS.map((G,i) => Object.assign({ estado:"pendiente", done:0, total:0 }, (META.grupos||[])[i] || {}, { tipo: G.tipo, titulo: G.titulo, nombre: nombreGrupo(i).replace(/^Pauta de /, "") }));
   undoStack = []; lastSnap = JSON.stringify(S);
-  persist();
-
+  busy(false);
+  $("#otTitle").textContent = META.equipo || META.desc || name.replace(/\.pdf$/i,"");
+  if (GRUPOS.length > 1){ ACTIVO = null; persist(); show("scr-ot"); renderSelector(); }
+  else activarGrupo(0);
+  if (META.sola && !S.ot) setTimeout(() => pedirOt(), 350);
+}
+/* pauta sin OT (viene sola o desde la biblioteca): se le pone el número a mano */
+const subOt = extra => (S.ot ? "OT " + S.ot : META && META.sola ? "OT sin número ✎" : "OT") + " · " + extra;
+function refrescarOt(){
+  if (ACTIVO == null) renderSelector();
+  else { $("#otSub").textContent = subOt(GRUPOS.length > 1 ? nombreGrupo(ACTIVO) : "Pauta"); renderStep(false); }
+}
+function pedirOt(){
+  if (!S) return;
+  sheet(`<div class="grab"></div><h3>N° de OT</h3>
+    <div class="m" style="margin-bottom:8px">${META.sola && !S.ot ? "Esta pauta no viene de una orden de trabajo. Escribe el número de la OT para que salga en la hoja." : "Número de la orden de trabajo que sale en la hoja."}</div>
+    <input type="text" id="otN" inputmode="numeric" value="${esc(S.ot||"")}" placeholder="Ej: 5178409">
+    <button class="btn pri big" id="otOk">Guardar</button>
+    <button class="btn big" data-close>${S.ot ? "Cancelar" : "Más tarde"}</button>`);
+  setTimeout(() => $("#otN").focus(), 80);
+  $("#otOk").onclick = () => { const v = $("#otN").value.replace(/\D/g, "");
+    if (!v && !META.sola){ toast("Escribe el número"); return; }
+    S.ot = v; META.ot = v; closeSheet(); persist(); refrescarOt(); if (v) toast("OT " + v); };
+}
+$("#otSub").onclick = () => { if (S) pedirOt(); };
+const nombreBase = g => { const G = GRUPOS[g] || {}; return G.tipo ? "Pauta de " + G.tipo : (G.titulo || "Pauta " + (g+1)); };
+// equipo de la operación (ej. "Insp Inst AIT44124 pH LnUF@RO" → "AIT44124 pH LnUF@RO")
+const equipoOp = op => op && op.desc ? op.desc.replace(/^(INSP|MANT|REST|CAMB|LUB\w*|REPA\w*|REVI\w*)\.?\s+((OP|DET)\s+)?(\d+D\s+)?(ELECTRICA|MECANICA|INST|ELEC|MEC)?\b\s*/i, "").trim() || op.desc : "";
+// título del botón: tipo si las pautas son de tipos distintos; si se repite, el equipo de la operación; si no hay, se numera
+const nombreGrupo = g => { const b = nombreBase(g), igual = GRUPOS.map((x,i) => i).filter(i => nombreBase(i) === b);
+  if (igual.length < 2) return b;
+  const unicos = f => { const v = igual.map(i => f(GRUPOS[i])); return v.every(Boolean) && new Set(v).size === v.length ? v : null; };
+  const eq = unicos(G => equipoOp(G.op)) || unicos(G => G.op && G.op.desc);
+  return eq ? eq[igual.indexOf(g)] : b + " " + (igual.indexOf(g) + 1); };
+const subGrupo = g => { const G = GRUPOS[g], t = nombreGrupo(g) !== nombreBase(g) && !/ \d+$/.test(nombreGrupo(g)) ? nombreBase(g) + " · " : ""; return t + (G.op ? "Operación " + G.op.op : ""); };
+const filasGrupo = g => PAGES_ALL.filter(p => p.grupo === g && p.checklist).flatMap(p => p.checklist.rows.map(r => ({ p, r, key: p.n+"-"+(r.key||r.item) })));
+/* OT con varias pautas: se elige cuál llenar */
+function renderSelector(){
+  PAGES = PAGES_ALL;
+  $("#otSub").textContent = subOt("Elige la pauta");
+  $("#stepper").innerHTML = "";
+  $("#stepBody").innerHTML = `<div class="head-row"><div><h2>¿Qué pauta vas a llenar?</h2><div class="m">${META.sola ? "Este documento" : "Esta OT"} trae ${GRUPOS.length} pautas</div></div></div>` +
+    GRUPOS.map((G,i) => { const m = META.grupos[i] || {}, n = filasGrupo(i).length;
+      const est = m.estado === "enviada" ? `<span class="pill env">Enviada</span>` : m.estado === "curso" ? `<span class="pill curso">En curso${m.total?` · ${m.done}/${m.total}`:""}</span>` : `<span class="pill">Pendiente</span>`;
+      return `<button class="card pauta-op" data-grupo="${i}"><div class="top"><b>${esc(nombreGrupo(i))}</b>${est}</div>
+        <div class="meta">${esc(G.titulo || "")}${n ? ` · ${n} actividades` : ""}</div>
+        ${G.op ? `<div class="meta">${esc(subGrupo(i).replace(/Operación \S+$/, ""))}Operación ${esc(G.op.op)}${G.op.desc && equipoOp(G.op) !== nombreGrupo(i) && G.op.desc !== nombreGrupo(i) ? " · " + esc(G.op.desc) : ""}</div>` : ""}</button>`; }).join("");
+  $("#stepFoot").innerHTML = "";
+  $$("[data-grupo]").forEach(b => b.onclick = () => activarGrupo(+b.dataset.grupo));
+}
+function activarGrupo(g){
+  ACTIVO = g; PAGES = PAGES_ALL.filter(p => !p.isPauta || p.grupo === g);
+  if (!S.fin[g]){ const pc = PAGES_ALL.find(p => p.grupo === g && p.campos), c = (pc && pc.campos) || {};
+    S.fin[g] = { eq: { area: c.area || "", desc: c.equipo || META.equipo || "", tag: c.tag || "" }, mat: [], rev: { fecha: "", preparo: "" } }; }
   STEPS = [];
   if (allEpp().length || allBoxes().length) STEPS.push({k:"epp", l: allBoxes().length ? "Inicio" : "EPP"});
   if (allRows().length) STEPS.push({k:"act", l:"Actividades"});
   if (PAGES.some(p=>p.resp)) STEPS.push({k:"firma", l:"Firma"});
   STEPS.push({k:"enviar", l:"Enviar"});
   step = 0;
-  if (saved){ const p = progreso(); if (p.total && p.done === p.total) step = Math.max(0, STEPS.findIndex(s=>s.k==="firma")); else if (Object.keys(S.checks).length) step = Math.max(0, STEPS.findIndex(s=>s.k==="act")); }
-  busy(false);
-  $("#otSub").textContent = (S.ot ? "OT " + S.ot : "OT") + " · Pauta";
-  $("#otTitle").textContent = META.equipo || META.desc || name.replace(/\.pdf$/i,"");
+  const p = progreso();
+  if (p.tocado){ if (p.total && p.done === p.total) step = Math.max(0, STEPS.findIndex(s=>s.k==="firma")); else if (allRows().some(({key}) => S.checks[key])) step = Math.max(0, STEPS.findIndex(s=>s.k==="act")); }
+  persist();
+  $("#otSub").textContent = subOt(GRUPOS.length > 1 ? nombreGrupo(g) : "Pauta");
   show("scr-ot"); renderStep();
   if (STEPS.length === 1) toast("No se reconocieron casillas: usa el botón Documento para marcar a mano", 4500);
 }
+/* datos del cierre (3.5, 3.6, 4 y 6) para dibujar en la hoja */
+function anaEntries(g){
+  return filasGrupo(g ?? 0).filter(({key}) => { const c = S.checks[key]; return c && c.estado === "CD" && (c.aviso || c.sub === "SI"); })
+    .map(({r, key}) => ({ item: r.item, aviso: (S.checks[key].aviso || "").trim(), text: (S.checks[key].detalle || "").trim(), key }));
+}
+function finDatos(g){
+  const F = (S.fin || {})[g ?? 0] || {};
+  return { eq: F.eq, mat: F.mat, ana: anaEntries(g), rev: { fecha: (F.rev && F.rev.fecha) || hoyTxt(), preparo: (F.rev && F.rev.preparo) || (S.resp[0] || {}).nombre || "" } };
+}
+const hayFin = k => PAGES.some(p => p.fin && p.fin[k]);
 
 function allRows(){ const out=[]; PAGES.forEach(p => p.checklist && p.checklist.rows.forEach(r => out.push({p, r, key: p.n+"-"+(r.key||r.item)}))); return out; }
 function allBoxes(){ const out=[]; PAGES.forEach(p => p.boxes && p.boxes.rows.forEach(r => out.push({p, r, key: p.n+"-"+r.key}))); return out; }
@@ -252,7 +538,7 @@ function allEpp(){ const out=[]; PAGES.forEach(p => p.epp && p.epp.rows.forEach(
 function obsEntries(){
   const list = [];
   allRows().forEach(({r,key}) => { const c = S.checks[key]; if (c && c.estado==="CD") list.push({ item: r.item, text: (c.detalle||"").trim(), auto:true, key }); });
-  S.obsExtra.forEach((o,i) => { if ((o.text||"").trim()) list.push({ item:o.item, text:o.text, idx:i }); });
+  S.obsExtra.forEach((o,i) => { if ((o.text||"").trim() && (o.g ?? 0) === (ACTIVO ?? 0)) list.push({ item:o.item, text:o.text, idx:i }); });
   return list;
 }
 const cap = s => s ? s.charAt(0) + s.slice(1).toLowerCase() : "";
@@ -376,7 +662,8 @@ function setCheck(key, g, k){
 function openDefect(key){
   const row = allRows().find(x => x.key === key); if (!row) return;
   const c = S.checks[key] || (S.checks[key] = {});
-  let txt = c.detalle || "", sub = c.sub || null, foto = S.fotos[key] || null;
+  let txt = c.detalle || "", sub = c.sub || null, foto = S.fotos[key] || null, aviso = c.aviso || "";
+  const conAna = PAGES.some(p => p.fin && p.fin.ana);
   const chipOn = d => txt.toLowerCase().includes(d.toLowerCase());
   const draw = () => {
     sheet(`<div class="grab"></div>
@@ -388,10 +675,13 @@ function openDefect(key){
         ${NATIVO ? `<button class="mic" id="mic" aria-label="Dictar por voz"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>` : ""}</div></div>
       ${subCols(row.p).length ? `<div><label class="f" style="margin-top:0">${/subsecuente/i.test(row.p.checklist.subLabel) ? "¿Requiere aviso subsecuente?" : esc(row.p.checklist.subLabel)}</label>
         <div class="seg" style="grid-template-columns:repeat(${subCols(row.p).length},minmax(0,1fr))">${subCols(row.p).map(x => `<button class="${btnCls(x.k)} ${sub===x.k?"on":""}" data-sub="${x.k}">${esc(x.label)}</button>`).join("")}</div></div>` : ""}
+      ${conAna && (sub === "SI" || !subCols(row.p).length) ? `<div><label class="f" style="margin-top:0" for="avisoTxt">N° aviso subsecuente${subCols(row.p).length ? "" : " (si lo generaste)"}</label>
+        <input type="text" id="avisoTxt" inputmode="numeric" value="${esc(aviso)}" placeholder="Ej: 4871503"></div>` : ""}
       ${foto ? `<div class="fotoprev"><img src="${foto}" alt="Foto del hallazgo"><button class="btn sm" id="fotoDel">Quitar</button></div>` :
         true ? `<button class="btn dash" id="fotoBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Adjuntar foto del hallazgo</button>` : ""}
       <button class="btn pri big" id="detOk">${row.p.checklist.mode === "ok" ? "Guardar observación" : "Guardar defecto"}</button>`);
     const ta = $("#detTxt"); ta.oninput = () => { txt = ta.value; };
+    const av = $("#avisoTxt"); if (av) av.oninput = () => { aviso = av.value; };
     $$("[data-chip]").forEach(b => b.onclick = () => {
       const d = perfil.defectos[+b.dataset.chip];
       if (chipOn(d)) txt = txt.replace(new RegExp("\\s*" + d.replace(/[.*+?^${}()|[\]\\/]/g,"\\$&") + "[.,;]?", "i"), "").trim();
@@ -402,7 +692,7 @@ function openDefect(key){
     const mic = $("#mic"); if (mic) mic.onclick = () => { window.__dictado = t => { const base = txt.trim(); if (!base || /[.!?]$/.test(base)) t = t.charAt(0).toUpperCase() + t.slice(1); txt = (base ? base + " " : "") + t; draw(); }; Android.dictar("det"); };
     const fb = $("#fotoBtn"); if (fb) fb.onclick = () => { window.__foto = url => { foto = url; draw(); }; if (NATIVO) Android.foto("det"); else fotoWeb(); };
     const fd = $("#fotoDel"); if (fd) fd.onclick = () => { foto = null; draw(); };
-    $("#detOk").onclick = () => { c.estado = "CD"; c.detalle = txt.trim(); c.sub = sub; if (foto) S.fotos[key] = foto; else delete S.fotos[key]; closeSheet(); changed(); };
+    $("#detOk").onclick = () => { c.estado = "CD"; c.detalle = txt.trim(); c.sub = sub; c.aviso = aviso.trim(); if (foto) S.fotos[key] = foto; else delete S.fotos[key]; closeSheet(); changed(); };
   };
   draw();
 }
@@ -416,8 +706,51 @@ function editObs(idx){
     <div><label class="f" style="margin-top:0">Observación</label><textarea id="oT">${esc(o.text)}</textarea></div>
     <button class="btn pri big" id="oOk">Guardar</button>
     ${idx>=0 ? `<button class="btn big" id="oDel" style="color:var(--def)">Eliminar</button>` : `<button class="btn big" data-close>Cancelar</button>`}`);
-  $("#oOk").onclick = () => { const v = { item: $("#oI").value.trim(), text: $("#oT").value.trim() }; if (idx>=0) S.obsExtra[idx] = v; else if (v.text) S.obsExtra.push(v); closeSheet(); changed(); };
+  $("#oOk").onclick = () => { const v = { item: $("#oI").value.trim(), text: $("#oT").value.trim(), g: idx >= 0 ? (S.obsExtra[idx].g ?? 0) : (ACTIVO ?? 0) }; if (idx>=0) S.obsExtra[idx] = v; else if (v.text) S.obsExtra.push(v); closeSheet(); changed(); };
   const d = $("#oDel"); if (d) d.onclick = () => { S.obsExtra.splice(idx,1); closeSheet(); changed(); };
+}
+
+/* --- Cierre de la pauta: 3.5 equipos, 3.6 materiales, 4 análisis, 6 control de revisiones --- */
+function htmlCierre(){
+  if (!["eq","mat","ana","rev"].some(hayFin)) return "";
+  const F = S.fin[ACTIVO ?? 0], D = finDatos(ACTIVO);
+  const inp = (k, v, ph, extra="") => `<input type="text" data-fin="${k}" value="${esc(v||"")}" placeholder="${esc(ph)}" ${extra}>`;
+  let h = "";
+  if (hayFin("eq")) h += `<div class="card"><b class="ct">3.5 Equipos / instrumentos donde aplica</b>
+    <label class="f">Área</label>${inp("eq.area", F.eq.area, "Ej: 540")}
+    <label class="f">Descripción</label>${inp("eq.desc", F.eq.desc, "Equipo o instrumento")}
+    <label class="f">TAG</label>${inp("eq.tag", F.eq.tag, "Ej: 0540-BM-0002E")}</div>`;
+  if (hayFin("mat")) h += `<div class="card"><b class="ct">3.6 Materiales y repuestos</b>
+    ${F.mat.length ? F.mat.map((m,i) => `<button class="matrow" data-mat="${i}"><b>${i+1}. ${esc(m.comp || m.desc || "Material")}</b><span>${esc([m.cant && (m.cant + (m.un ? " " + m.un : "")), m.lote && "Lote " + m.lote].filter(Boolean).join(" · "))}</span></button>`).join("") : `<div class="m" style="margin:6px 0">Sin materiales.</div>`}
+    <button class="btn dash" id="addMat">+ Agregar material</button></div>`;
+  if (hayFin("ana")){ const sinN = D.ana.filter(e => !e.aviso);
+    h += `<div class="card"><b class="ct">4. Análisis y mejoramiento</b>
+    ${D.ana.length ? D.ana.map(e => `<button class="matrow" data-anadef="${esc(e.key)}"><b>Ítem ${esc(e.item)} · ${e.aviso ? "Aviso " + esc(e.aviso) : '<span style="color:var(--def)">Falta N° de aviso</span>'}</b><span>${esc(corto(e.text || "", 80))}</span></button>`).join("")
+      : `<div class="m" style="margin:6px 0">Se llena con los defectos que tienen aviso subsecuente.</div>`}
+    ${sinN.length ? `<div class="m" style="margin-top:4px">Toca un ítem para agregar el N° de aviso.</div>` : ""}</div>`; }
+  if (hayFin("rev")) h += `<div class="card"><b class="ct">6. Control de revisiones</b>
+    <div class="grid2"><div><label class="f">Fecha</label>${inp("rev.fecha", F.rev.fecha, D.rev.fecha)}</div>
+    <div><label class="f">Preparó</label>${inp("rev.preparo", F.rev.preparo, D.rev.preparo || "Nombre")}</div></div></div>`;
+  return `<div class="sec-t" style="margin-top:14px">Cierre de la pauta</div>` + h;
+}
+function enlazarCierre(){
+  const F = S.fin && S.fin[ACTIVO ?? 0]; if (!F) return;
+  $$("[data-fin]").forEach(i => i.oninput = () => { const [a, b] = i.dataset.fin.split("."); F[a][b] = i.value; changed(true, false); });
+  $$("[data-mat]").forEach(b => b.onclick = () => editMat(+b.dataset.mat));
+  const am = $("#addMat"); if (am) am.onclick = () => editMat(-1);
+  $$("[data-anadef]").forEach(b => b.onclick = () => openDefect(b.dataset.anadef));
+}
+function editMat(i){
+  const F = S.fin[ACTIVO ?? 0], m = i >= 0 ? F.mat[i] : { comp:"", desc:"", cant:"", un:"", lote:"" };
+  const f = (k, l, ph, im="text") => `<div><label class="f" style="margin-top:0">${l}</label><input type="text" id="m_${k}" inputmode="${im}" value="${esc(m[k]||"")}" placeholder="${esc(ph)}"></div>`;
+  sheet(`<div class="grab"></div><h3>${i >= 0 ? "Editar" : "Agregar"} material</h3>
+    ${f("comp","Componente / repuesto / material","Ej: Sensor inductivo")}${f("desc","Descripción","Ej: M18, 24 VDC")}
+    <div class="grid2">${f("cant","Cantidad","1","decimal")}${f("un","Unidad","Un")}</div>${f("lote","Lote","Opcional")}
+    <button class="btn pri big" id="mOk">Guardar</button>
+    ${i >= 0 ? `<button class="btn big" id="mDel" style="color:var(--def)">Eliminar</button>` : `<button class="btn big" data-close>Cancelar</button>`}`);
+  $("#mOk").onclick = () => { const v = {}; ["comp","desc","cant","un","lote"].forEach(k => v[k] = $("#m_"+k).value.trim());
+    if (v.comp || v.desc){ if (i >= 0) F.mat[i] = v; else F.mat.push(v); } closeSheet(); changed(); };
+  const d = $("#mDel"); if (d) d.onclick = () => { F.mat.splice(i, 1); closeSheet(); changed(); };
 }
 
 /* --- Firma --- */
@@ -447,10 +780,12 @@ function renderFirma(){
       ${r.sig ? `<button class="btn" data-rsig="${i}" style="width:100%">Firmar de nuevo</button>` : ""}
     </div>`).join("")}
     ${S.resp.length < maxP ? `<button class="btn dash" id="addP">+ Otra persona</button>` : ""}
+    ${htmlCierre()}
     <div class="card" style="margin-top:10px"><b style="font-size:15px">Revisión</b>
       ${checks.map(([ok,t]) => `<div class="okline ${ok?"y":"n"}">${ok?ICON_OK:ICON_NO}${esc(t)}</div>`).join("")}</div>`;
   footNext("Generar pauta llena", nextStep);
   const ap = $("#addP"); if (ap) ap.onclick = () => { S.resp.push({nombre:"",cargo:"",sig:null}); changed(); };
+  enlazarCierre();
   $$("[data-rdel]").forEach(b => b.onclick = () => { S.resp.splice(+b.dataset.rdel,1); changed(); });
   $$("[data-rsig]").forEach(b => b.onclick = () => { const i = +b.dataset.rsig; openSignature(url => { S.resp[i].sig = url; if (i===0){ perfil.firma = url; guardarPerfil(); } changed(); }); });
   $$("[data-rf]").forEach(inp => {
@@ -468,12 +803,14 @@ async function renderEnviar(){
   try { OUTS = await generarImagenes(); } catch(e){ console.error(e); $("#stepBody").innerHTML = `<div class="warn">No se pudieron generar las imágenes.</div>`; return; }
   const p = progreso();
   $("#stepBody").innerHTML = `
+    ${!S.ot ? `<div class="warn" style="display:flex;gap:10px;align-items:center"><span style="flex:1">La hoja va sin N° de OT.</span><button class="btn sm" id="btnPonerOt">Poner N° OT</button></div>` : ""}
     ${p.done < p.total ? `<div class="warn">Atención: faltan ${p.total - p.done} actividades por completar.</div>` : ""}
     <div class="prev">${OUTS.map(o => `<figure><img src="${o.url}" alt=""><figcaption>${esc(o.cap)}</figcaption></figure>`).join("")}</div>
     <div class="hint" style="margin:6px 0 12px">${OUTS.length} imagen${OUTS.length>1?"es":""} · desliza para ver</div>`;
   $("#stepFoot").innerHTML = `
     <button class="btn ok huge" id="wa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-13.4 7.9L3 21l1.2-4.4A9 9 0 1 1 21 12z"/></svg>Enviar por WhatsApp</button>
     <div class="grid2"><button class="btn" id="pdfBtn">Guardar PDF</button><button class="btn" id="otro">Otro medio</button></div>`;
+  { const b = $("#btnPonerOt"); if (b) b.onclick = pedirOt; }
   $("#wa").onclick = () => compartir("whatsapp");
   $("#otro").onclick = () => compartir("otro");
   $("#pdfBtn").onclick = guardarPdf;
@@ -486,7 +823,7 @@ async function renderPageImage(P, scale){
   await P.page.render({ canvasContext: ctx, viewport: vp }).promise;
   const urls = [...S.resp.map(r=>r.sig), ...S.free.filter(a=>a.sig).map(a=>a.sig)].filter(Boolean);
   await Promise.all(urls.map(loadImg));
-  drawAnnotations(ctx, P, scale, false);
+  drawAnnotations(ctx, P, scale, false, true);
   return c;
 }
 async function fotoCanvas(key){
@@ -507,10 +844,11 @@ async function generarImagenes(){
   fijarEstiloOt();
   const sel = PAGES.filter(P => P.isPauta), canv = [];
   for (const P of sel){ canv.push(await renderPageImage(P, 2.6)); await ceder(); }
-  const base = `Pauta_OT${S.ot||""}`, outs = [];
+  const G = GRUPOS.length > 1 ? "_" + sinTilde(nombreGrupo(ACTIVO).replace(/^Pauta de /, "")).replace(/[^\w.-]+/g, "_").replace(/_+$/, "").slice(0, 40) : "";
+  const base = `Pauta_OT${S.ot||""}${G}`, outs = [], keysG = new Set(allRows().map(r => r.key));
   for (let i=0;i<canv.length;i++) outs.push({ canvas:canv[i], blob: await toBlob(canv[i]), name: `${base}_hoja${i+1}.jpg`, cap: `Hoja ${i+1} de ${canv.length}` });
   for (const key of Object.keys(S.fotos)){
-    if ((S.checks[key]||{}).estado !== "CD") continue;
+    if ((S.checks[key]||{}).estado !== "CD" || !keysG.has(key)) continue;
     const c = await fotoCanvas(key); if (!c) continue;
     const it = key.split("-")[1];
     outs.push({ canvas:c, blob: await toBlob(c, 0.85), name: `${base}_hallazgo_item${it}.jpg`, cap: `Foto hallazgo ítem ${it}`, foto:true });
@@ -518,7 +856,11 @@ async function generarImagenes(){
   outs.forEach(o => o.url = URL.createObjectURL(o.blob));
   return outs;
 }
-function marcarEnviada(){ META.estado = "enviada"; META.enviada = Date.now(); persist(); }
+function marcarEnviada(){
+  if (META.grupos && META.grupos.length > 1 && ACTIVO != null){ META.grupos[ACTIVO].estado = "enviada"; META.grupos[ACTIVO].enviada = Date.now(); }
+  else { META.estado = "enviada"; }
+  META.enviada = Date.now(); persist();
+}
 async function compartir(modo){
   busy(true, "Preparando…");
   try {
@@ -687,6 +1029,12 @@ function renderSettings(){
 /* ================= NOVEDADES POR VERSIÓN ================= */
 /* La primera entrada es la versión actual: se muestra una vez al abrir la app tras actualizar. */
 const NOVEDADES = [
+  { v: "Ver. 1.31", fecha: "22-11-2026", items: [
+    "Se crea \"Biblioteca de pautas\": agrega el enlace de una carpeta de Google Drive y llena pautas sin necesidad de una OT. En Android también puedes usar una carpeta del teléfono.",
+    "Ver antes de llenar: revisa la pauta antes de elegirla.",
+    "N° de OT: las pautas que no vienen de una OT piden el número para que salga en la hoja.",
+    "OT con varias pautas: la app las reconoce (inspección, mantención o por equipo) y eliges cuál llenar con un botón.",
+    "Cierre del formato nuevo: equipos, materiales, aviso subsecuente, fecha y responsable." ] },
   { v: "Ver. 1.30", fecha: "09-11-2026", items: [
     "Incorporación del proyecto a repositorio.",
     "Verificación de actualización disponible o búsqueda en Android.",
@@ -720,7 +1068,12 @@ function mostrarNovedades(todas){
     <button class="btn pri big" data-close>Entendido</button>`);
   perfil.ultimaVer = VERSION_APP; guardarPerfil();
 }
-function revisarNovedades(){ if (terminosOk() && perfil.ultimaVer !== VERSION_APP) setTimeout(() => mostrarNovedades(false), 400); }
+function revisarNovedades(){
+  if (!terminosOk() || perfil.ultimaVer === VERSION_APP) return;
+  // versiones de prueba (1.30.1, 1.30.2…): no repiten las novedades de la versión base
+  if (perfil.ultimaVer && numVer(perfil.ultimaVer) === numVer(VERSION_APP)){ perfil.ultimaVer = VERSION_APP; guardarPerfil(); return; }
+  setTimeout(() => mostrarNovedades(false), 400);
+}
 
 /* ================= ESTILO DE VISTOS ================= */
 const ESTILOS = { parejo: {pos:0,rot:0,tam:0,trazo:0}, natural: {pos:55,rot:40,tam:60,trazo:65}, maximo: {pos:100,rot:100,tam:100,trazo:100} };
