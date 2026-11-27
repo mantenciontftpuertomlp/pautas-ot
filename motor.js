@@ -267,6 +267,52 @@ function detectAplica(words, lines, W){
   return out;
 }
 
+/* Columnas "Status" y "Dur. (min)" del formato nuevo: una celda por actividad (3.2) o una celda combinada para todo el bloque (3.1 / 3.3) */
+function detectStatusDur(words, W, lines){
+  const V = (lines && lines.v) || [], out = [];
+  if (!V.length) return out;
+  const heads = [];
+  for (const w of words){
+    if (/^Status$/i.test(w.t)) heads.push({ tipo: "status", x0: w.x0, x1: w.x1, y: w.y });
+    else if (/^Dur\.?$/i.test(w.t)){ const m = words.find(o => /^\(min\)$/i.test(o.t) && ((Math.abs(o.y - w.y) < 3 && o.x0 > w.x1 && o.x0 - w.x1 < 8) || (o.y > w.y && o.y - w.y < 12 && o.x0 < w.x1 + 4 && o.x1 > w.x0 - 4)));
+      if (m) heads.push({ tipo: "dur", x0: Math.min(w.x0, m.x0), x1: Math.max(w.x1, m.x1), y: Math.max(w.y, m.y) }); }
+  }
+  const cruza = (v, y0, y1) => v.y0 <= y0 + 2 && v.y1 >= y1 - 2;
+  for (const h of heads){
+    const xL = V.filter(v => cruza(v, h.y, h.y) && v.x < h.x0).map(v => v.x), xR = V.filter(v => cruza(v, h.y, h.y) && v.x > h.x1).map(v => v.x);
+    if (!xL.length || !xR.length) continue;
+    const L = Math.max(...xL), R = Math.min(...xR), cxc = (L + R)/2;
+    if (R - L > 120) continue;
+    let y = cellBounds(lines, cxc, h.y).bot, i = 0;
+    if (y >= 1e9) continue;
+    while (i < 60){
+      const cb = cellBounds(lines, cxc, y + 2);
+      if (cb.bot >= 1e9 || cb.bot - y > 420 || cb.bot - y < 5) break;
+      const vl = V.some(v => Math.abs(v.x - L) < 1.5 && cruza(v, y, cb.bot)), vr = V.some(v => Math.abs(v.x - R) < 1.5 && cruza(v, y, cb.bot));
+      if (!vl || !vr) break;
+      if (words.some(o => o.y > y && o.y < cb.bot && /^(Status|Dur\.?|Item|Ítem|Área)$/i.test(o.t))) break;
+      // si la celda ya trae algo impreso (p. ej. minutos planificados) no se escribe encima
+      if (!words.some(o => cx(o) > L + 1 && cx(o) < R - 1 && o.y > y + 1 && o.y < cb.bot - 1))
+        out.push({ tipo: h.tipo, key: h.tipo[0] + Math.round(h.y) + "_" + i, l: L, r: R, top: y, bot: cb.bot, hy: h.y });
+      y = cb.bot; i++;
+    }
+  }
+  return out;
+}
+
+/* Hoja que continúa la tabla 3.2 sin repetir el encabezado: usa las columnas de la hoja anterior */
+function statusDurCont(words, lines, rows, cols){
+  const V = (lines && lines.v) || [], out = [];
+  for (const r of rows) for (const c of cols){
+    const cb = cellBounds(lines, (c.l + c.r)/2, r.y);
+    if (cb.top <= -1e9 || cb.bot >= 1e9 || cb.bot - cb.top > 80) continue;
+    const ok = [c.l, c.r].every(x => V.some(v => Math.abs(v.x - x) < 2 && v.y0 <= cb.top + 2 && v.y1 >= cb.bot - 2));
+    if (!ok || words.some(o => cx(o) > c.l + 1 && cx(o) < c.r - 1 && o.y > cb.top + 1 && o.y < cb.bot - 1)) continue;
+    out.push({ tipo: c.tipo, key: c.tipo[0] + "c" + Math.round(cb.top), l: c.l, r: c.r, top: cb.top, bot: cb.bot, hy: -1 });
+  }
+  return out;
+}
+
 /* Casillas sueltas: una celda vacía angosta justo a la derecha de un texto (Área / Equipos inspeccionados) */
 function detectBoxes(words, lines, W, excl){
   const V = (lines && lines.v) || [];
@@ -613,6 +659,13 @@ function drawAnnotations(ctx, P, s, guides, final){
         if (guides){ ctx.setLineDash([3,3]); ctx.strokeStyle="rgba(15,94,168,.35)"; ctx.lineWidth=1; ctx.strokeRect((col.l+1.5)*s, (r.y-h/2+1.5)*s, (col.w-3)*s, (h-3)*s); ctx.setLineDash([]); }
         if (c[col.g] === col.k) drawCheck(ctx, col.x*s, r.y*s, Math.min(12, h*0.7)*s, (col.k==="CD" || (col.g==="sub" && col.k!=="NO" && col.k!=="NA")) ? COLOR.red : COLOR.blue);
       }
+    }
+  }
+  if (P.sd && P.sd.length){
+    for (const c of P.sd){
+      const v = c.tipo === "status" ? (S.stat||{})[c.id] : (S.dur||{})[c.id];
+      if (v) fitText(ctx, v, (c.l + c.r)/2, (c.top + c.bot)/2, c.r - c.l - 3, s, 6.6, COLOR.blue, "center", false);
+      else if (guides){ ctx.setLineDash([2,2]); ctx.strokeStyle="rgba(15,94,168,.30)"; ctx.lineWidth=1; ctx.strokeRect((c.l+1.5)*s, (c.top+1.5)*s, (c.r-c.l-3)*s, Math.min(c.bot-c.top-3, 40)*s); ctx.setLineDash([]); }
     }
   }
   if (P.epp){

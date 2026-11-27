@@ -1,8 +1,8 @@
 "use strict";
 /* Pautas OT — interfaz de la app (Ver. 1.25) */
-const VERSION_APP = "Ver. 1.31";
+const VERSION_APP = "Ver. 1.32";
 const URL_SITIO = "https://mantenciontftpuertomlp.github.io/pautas-ot/";
-const TERMINOS_VER = 2; // 2: se agrega el uso de internet para buscar actualizaciones (Ver. 1.30)
+const TERMINOS_VER = 3; // 2: internet para buscar actualizaciones (Ver. 1.30) · 3: biblioteca de pautas y manejo de la información
 
 /* ---------- utilidades ---------- */
 const $ = (s, r=document) => r.querySelector(s);
@@ -24,14 +24,32 @@ const NATIVO = typeof window.Android !== "undefined";
 const memFiles = {}; // versión web: se guarda también en IndexedDB
 const IDB = {
   db: null,
-  abrir(){ return this.db ? Promise.resolve(this.db) : new Promise((res, rej) => { const r = indexedDB.open("pautasot", 1); r.onupgradeneeded = () => r.result.createObjectStore("ots"); r.onsuccess = () => { this.db = r.result; res(this.db); }; r.onerror = () => rej(r.error); }); },
+  abrir(){ return this.db ? Promise.resolve(this.db) : new Promise((res, rej) => { const r = indexedDB.open("pautasot", 2); r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains("ots")) d.createObjectStore("ots"); if (!d.objectStoreNames.contains("bib")) d.createObjectStore("bib"); }; r.onsuccess = () => { this.db = r.result; res(this.db); }; r.onerror = () => rej(r.error); }); },
   async op(modo, fn){ const db = await this.abrir(); return new Promise((res, rej) => { const tx = db.transaction("ots", modo), st = tx.objectStore("ots"), q = fn(st); tx.oncomplete = () => res(q && q.result); tx.onerror = () => rej(tx.error); }); },
   poner(n, v){ return this.op("readwrite", st => st.put(v, n)).catch(() => toast("No se pudo guardar la OT en el teléfono")); },
   quitar(n){ return this.op("readwrite", st => st.delete(n)).catch(() => {}); },
+  async bib(modo, fn){ const db = await this.abrir(); return new Promise((res, rej) => { const tx = db.transaction("bib", modo), st = tx.objectStore("bib"), q = fn(st); tx.oncomplete = () => res(q && q.result); tx.onerror = () => rej(tx.error); }); },
+  bibPoner(k, v){ return this.bib("readwrite", st => st.put(v, k)); },
+  bibLeer(k){ return this.bib("readonly", st => st.get(k)); },
+  bibQuitar(pref){ return this.bib("readwrite", st => st.delete(IDBKeyRange.bound(pref, pref + "\uffff"))).catch(() => {}); },
   async cargar(){ try { const db = await this.abrir(); await new Promise(res => { const tx = db.transaction("ots"), st = tx.objectStore("ots"), c = st.openCursor(); c.onsuccess = () => { const k = c.result; if (k){ memFiles[k.key] = k.value; k.continue(); } else res(); }; c.onerror = () => res(); }); } catch(e){} }
 };
-async function fotoWeb(){
-  const i = document.createElement("input"); i.type = "file"; i.accept = "image/*"; i.setAttribute("capture", "environment");
+/* elegir de dónde viene la foto: cámara o galería */
+function pedirFoto(cb, volver, conEtiqueta){
+  sheet(`<div class="grab"></div><h3>Agregar foto</h3>
+    <button class="btn big pri" id="pfCam"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Tomar foto</button>
+    <button class="btn big" id="pfGal"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>Elegir de la galería</button>
+    <button class="btn big" id="pfNo">Cancelar</button>`);
+  const fin = () => { if (volver) volver(); else closeSheet(); };
+  // después de sacar o elegir la foto se abre el editor: marcarla o guardarla tal cual
+  const etq = conEtiqueta ? { def: false, obs: "" } : null;
+  window.__foto = url => editarFoto(url, async b => { await cb(b, etq); }, () => { if (volver) volver(); else closeSheet(); }, true, etq);
+  $("#pfCam").onclick = () => { fin(); if (NATIVO) Android.foto("f"); else fotoWeb(true); };
+  $("#pfGal").onclick = () => { fin(); if (NATIVO) Android.fotoGaleria("f"); else fotoWeb(false); };
+  $("#pfNo").onclick = fin;
+}
+async function fotoWeb(camara = true){
+  const i = document.createElement("input"); i.type = "file"; i.accept = "image/*"; if (camara) i.setAttribute("capture", "environment");
   i.onchange = () => { const f = i.files[0]; if (!f) return; const url = URL.createObjectURL(f), im = new Image();
     im.onload = () => { const k = Math.min(1, 1600 / Math.max(im.width, im.height)), c = document.createElement("canvas"); c.width = Math.round(im.width*k); c.height = Math.round(im.height*k);
       c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url); if (window.__foto) window.__foto(c.toDataURL("image/jpeg", 0.85)); };
@@ -53,7 +71,7 @@ function guardarPerfil(){ LS.set("perfil", perfil); }
 
 const COLOR = { blue:"#1e1e1e", red:"#1e1e1e", white:"#ffffff", ink:"#1e1e1e" }; // marcas sobre el PDF: negro suave, como lápiz pasta (Ver. 1.27)
 let PDF = null, PAGES = [], S = null, FILE = null, META = null;
-let PAGES_ALL = [], GRUPOS = [], ACTIVO = 0; // varias pautas en una OT (inspección, mantención…)
+let PAGES_ALL = [], GRUPOS = [], ACTIVO = 0, SDCOLS = []; // varias pautas en una OT (inspección, mantención…)
 let STEPS = [], step = 0;
 const imgCache = new Map();
 let undoStack = [];
@@ -93,6 +111,7 @@ function progreso(){
 /* ---------- navegación ---------- */
 function show(id){ $$(".scr").forEach(s => s.classList.toggle("hidden", s.id !== id)); }
 window.atras = function(){
+  if (VISOR){ cerrarVisor(); return true; }
   if ($("#sheetRoot").firstChild){ closeSheet(); return true; }
   if (!$("#busy").classList.contains("hidden")) return true;
   if (!$("#scr-doc").classList.contains("hidden")){ show("scr-ot"); renderStep(); return true; }
@@ -164,7 +183,7 @@ $("#homeList").addEventListener("click", e => {
       <button class="btn big" id="mReset">Borrar lo llenado (empezar de cero)</button>
       <button class="btn big" id="mDel" style="color:var(--def);border-color:#F0C9AE">Eliminar OT del teléfono</button>
       <button class="btn big" data-close>Cancelar</button>`);
-    $("#mDel").onclick = () => { N.borrar(name); LS.del(stKey(name)); LS.del(metaKey(name)); closeSheet(); renderHome(); };
+    $("#mDel").onclick = () => { borrarFotosOt(name); N.borrar(name); LS.del(stKey(name)); LS.del(metaKey(name)); closeSheet(); renderHome(); };
     $("#mReset").onclick = () => { LS.del(stKey(name)); const mm = LS.get(metaKey(name)); if (mm){ mm.estado="pendiente"; mm.done=0; LS.set(metaKey(name), mm); } closeSheet(); renderHome(); };
   }
 });
@@ -193,12 +212,33 @@ const NATW = {
     if (!r.ok){ let m = ""; try { m = (await r.json()).error.message; } catch(e){} throw new Error(r.status === 404 ? "No se encontró: revisa que esté compartido con cualquiera con el enlace" : "Drive: " + (m || "error " + r.status)); }
     return r; },
   async bibTexto(url){ return (await this.bajar(url)).text(); },
-  async bytes(url){ const u = new Uint8Array(await (await this.bajar(url)).arrayBuffer()); if (!(u[0]===37 && u[1]===80 && u[2]===68 && u[3]===70)) throw new Error("El archivo no es un PDF"); return u; },
+  async bytes(url){
+    if (url.startsWith("idb:")){ const b = await IDB.bibLeer(url.slice(4)); if (!b) throw new Error("La pauta ya no está: vuelve a cargar el ZIP"); return new Uint8Array(await b.arrayBuffer()); }
+    const u = new Uint8Array(await (await this.bajar(url)).arrayBuffer()); if (!(u[0]===37 && u[1]===80 && u[2]===68 && u[3]===70)) throw new Error("El archivo no es un PDF"); return u; },
   async bibVer(url){ const u = await this.bytes(url); NATW.vista = { url, u }; let s = ""; for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768)); return btoa(s); },
   async bibTraer(url, nombre){ const u = NATW.vista && NATW.vista.url === url ? NATW.vista.u : await this.bytes(url);
     const d = new Date(), p = n => String(n).padStart(2, "0"), base = (nombre || "Pauta").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
     let n = `Bib_${base}_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.pdf`, k = 2; while (memFiles[n]) n = n.replace(/(_\d+)?\.pdf$/, "_" + (k++) + ".pdf");
     const blob = new Blob([u], { type: "application/pdf" }); memFiles[n] = { b64: await blobToB64(blob), t: Date.now() }; await IDB.poner(n, memFiles[n]); return n; }
+};
+/* ZIP en la versión web: JSZip se carga solo cuando se necesita */
+function cargarJSZip(){ return window.JSZip ? Promise.resolve() : new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "lib/jszip.min.js"; sc.onload = res; sc.onerror = () => rej(new Error("No se pudo cargar el lector de ZIP")); document.head.appendChild(sc); }); }
+NATW.bibZip = async function(files, bibId, reemplazar){
+  await cargarJSZip();
+  if (reemplazar) await IDB.bibQuitar(bibId + "/");
+  const items = []; let otros = 0, n = Date.now();
+  for (const file of files){
+    let z; try { z = await JSZip.loadAsync(file); } catch(e){ throw new Error("No se pudo leer el ZIP " + file.name); }
+    for (const e of Object.values(z.files)){
+      const name = e.name.replace(/\\/g, "/"); if (e.dir || name.includes("__MACOSX")) continue;
+      const base = name.split("/").pop(); if (!base || base.startsWith(".")) continue;
+      if (!/\.pdf$/i.test(base)){ otros++; continue; }
+      const k = bibId + "/" + (n++);
+      await IDB.bibPoner(k, new Blob([await e.async("uint8array")], { type: "application/pdf" }));
+      items.push({ nombre: base, ruta: name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : "", ref: "idb:" + k });
+    }
+  }
+  return JSON.stringify({ items, otros });
 };
 function nat(metodo, ...args){
   if (!NATIVO) return NATW[metodo] ? NATW[metodo](...args) : Promise.reject(new Error("No disponible en esta versión"));
@@ -249,12 +289,12 @@ async function refrescarFuente(f){
   } catch(e){ toast(e.message && e.message !== "error" ? e.message : "No se pudo leer la biblioteca", 4000); }
   delete BIB.cargando[f.id]; renderBib();
 }
-function abrirBib(){ BIB.dir = null; show("scr-bib"); renderBib(); BIB.fuentes.forEach(f => { const l = LS.get("bib.lista." + f.id, null); if (!l) refrescarFuente(f); }); }
+function abrirBib(){ BIB.dir = null; show("scr-bib"); renderBib(); BIB.fuentes.forEach(f => { const l = LS.get("bib.lista." + f.id, null); if (!l && f.tipo !== "zip") refrescarFuente(f); }); }
 function renderBib(){
   const fs = BIB.fuentes, q = BIB.q.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   if (!fs.length){
     $("#bibBody").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-2z"/><path d="M10 3h4v18h-4zM14 4l4-1 3 17-4 1z"/></svg>
-      <div><b>Aún no hay bibliotecas</b></div><div style="font-size:14px;margin-top:6px">${NATIVO ? "Agrega una carpeta del teléfono o el enlace de una carpeta de Google Drive" : "Agrega el enlace de una carpeta de Google Drive"} con las pautas de trabajo en PDF.</div></div>`;
+      <div><b>Aún no hay bibliotecas</b></div><div style="font-size:14px;margin-top:6px">${NATIVO ? "Agrega una carpeta del teléfono o un archivo ZIP" : "Agrega un archivo ZIP"} con las pautas de trabajo en PDF (por ejemplo, la carpeta descargada desde Drive).</div></div>`;
     return;
   }
   const norm = t => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -262,7 +302,7 @@ function renderBib(){
   fs.filter(f => q || !BIB.dir || BIB.dir.fid === f.id).forEach(f => {
     const l = LS.get("bib.lista." + f.id, null), items = l ? l.items.filter(x => x.pdf && (!q || norm(x.nombre + " " + x.ruta).includes(q))) : [];
     const noPdf = l ? l.items.filter(x => !x.pdf).length : 0;
-    const tipo = f.tipo === "carpeta" ? "Carpeta del teléfono" : f.tipo === "drive" ? "Google Drive" : "Enlace";
+    const tipo = f.tipo === "carpeta" ? "Carpeta del teléfono" : f.tipo === "zip" ? "Archivo ZIP" : f.tipo === "drive" ? "Google Drive" : "Enlace";
     html += `<div class="bib-src"><div class="hd"><div style="flex:1"><b>${esc(f.nombre)}</b><div class="m">${tipo}${l ? ` · ${(n => n + (n === 1 ? " pauta" : " pautas"))(l.items.filter(x=>x.pdf).length)} · actualizada ${new Date(l.t).toLocaleDateString("es-CL")}` : ""}</div></div>
       ${BIB.cargando[f.id] ? `<div class="spin dark" style="width:18px;height:18px"></div>` : `<button class="btn sm" data-bibup="${f.id}">Actualizar</button>`}
       <button class="icon-btn" data-bibmenu="${f.id}" aria-label="Opciones" style="color:var(--muted)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/></svg></button></div>`;
@@ -290,16 +330,18 @@ function renderBib(){
 }
 $("#bibBody").addEventListener("click", async e => {
   const dr = e.target.closest("[data-bibdir]"); if (dr){ const [fid, ...r] = dr.dataset.bibdir.split("|"), ruta = r.join("|"); BIB.dir = ruta ? { fid, ruta } : null; renderBib(); $("#bibBody").scrollTop = 0; return; }
-  const up = e.target.closest("[data-bibup]"); if (up){ const f = BIB.fuentes.find(x => x.id === up.dataset.bibup); if (f) refrescarFuente(f); return; }
+  const up = e.target.closest("[data-bibup]"); if (up){ const f = BIB.fuentes.find(x => x.id === up.dataset.bibup); if (f) (f.tipo === "zip" ? menuZip(f) : refrescarFuente(f)); return; }
   const mn = e.target.closest("[data-bibmenu]");
   if (mn){ const f = BIB.fuentes.find(x => x.id === mn.dataset.bibmenu); if (!f) return;
     sheet(`<div class="grab"></div><h3>${esc(f.nombre)}</h3>
+      ${f.tipo === "zip" ? `<button class="btn big" id="bZip">Actualizar con ZIP</button>` : ""}
       <button class="btn big" id="bRen">Cambiar nombre</button>
       <button class="btn big" id="bDel" style="color:var(--def);border-color:#F0C9AE">Quitar biblioteca</button>
-      <div class="hint" style="margin:4px 0 8px">Quitarla no borra las pautas que ya llenaste.</div>
+      <div class="hint" style="margin:4px 0 8px">${f.tipo === "zip" ? "Se borran las pautas que la app guardó de este ZIP. El archivo ZIP original del teléfono no se toca." : f.tipo === "carpeta" ? "La carpeta y sus archivos siguen en el teléfono; la app solo deja de mostrarla." : "Solo se quita de la app."} Las pautas que ya llenaste no se borran.</div>
       <button class="btn big" data-close>Cancelar</button>`);
     $("#bRen").onclick = () => { closeSheet(); openText("Nombre de la biblioteca", f.nombre, v => { v = v.trim(); if (!v) return; BIB.fuentes = BIB.fuentes.map(x => x.id === f.id ? Object.assign(x, { nombre: v }) : x); renderBib(); }); };
-    $("#bDel").onclick = () => { BIB.dir = null; BIB.fuentes = BIB.fuentes.filter(x => x.id !== f.id); LS.del("bib.lista." + f.id); closeSheet(); renderBib(); };
+    if ($("#bZip")) $("#bZip").onclick = () => { closeSheet(); menuZip(f); };
+    $("#bDel").onclick = () => { if (f.tipo === "zip"){ if (NATIVO) Android.bibQuitar(f.id); else IDB.bibQuitar(f.id + "/"); } BIB.dir = null; BIB.fuentes = BIB.fuentes.filter(x => x.id !== f.id); LS.del("bib.lista." + f.id); closeSheet(); renderBib(); };
     return; }
   const vv = e.target.closest("[data-ver]");
   if (vv){ const [fid, ref, ...rest] = vv.dataset.ver.split("|"); verPauta(ref, rest.join("|")); return; }
@@ -345,31 +387,75 @@ $("#verBody").addEventListener("click", e => { const c = e.target.closest("canva
   if (z){ b.scrollTop = c.offsetTop + fy * c.clientHeight - b.clientHeight / 2; b.scrollLeft = fx * c.clientWidth - b.clientWidth / 2; } else b.scrollTop = c.offsetTop - 10; });
 function cerrarVista(){ if (VISTA){ try { VISTA.doc.destroy(); } catch(e){} } VISTA = null; $("#verBody").innerHTML = ""; }
 $("#verLlenar").onclick = () => { if (!VISTA) return; const { ref, nombre } = VISTA; cerrarVista(); llenarBib(ref, nombre); };
+/* ---- Bibliotecas desde ZIP (p. ej. carpeta descargada de Drive) ---- */
+const nombreZip = n => (n || "Pautas").replace(/\.zip$/i, "").replace(/-\d{8}T\d{6}Z(-\d+)?$/i, "").replace(/-\d{3}$/, "").replace(/[_]+/g, " ").trim() || "Pautas";
+function normalizarZip(items){
+  // si todo viene dentro de una misma carpeta raíz (lo normal en Drive), esa carpeta pasa a ser el nombre
+  const segs = items.map(x => (x.ruta || "").split("/").filter(Boolean));
+  let raiz = "";
+  if (segs.length && segs.every(sg => sg.length && sg[0] === segs[0][0])) raiz = segs[0][0];
+  return { raiz, items: items.map((x, i) => ({ nombre: x.nombre, ruta: (raiz ? segs[i].slice(1) : segs[i]).join(" / "), ref: x.ref, pdf: true })) };
+}
+async function procesarZips(srcs, nombres, destino){
+  const nueva = !destino, bibId = nueva ? "z" + Date.now().toString(36) : destino.id, reemplazar = !!(destino && destino.reemplazar);
+  busy(true, "Leyendo el ZIP…");
+  let r;
+  try { r = JSON.parse(NATIVO ? await nat("bibZip", JSON.stringify(srcs), bibId, reemplazar) : await NATW.bibZip(srcs, bibId, reemplazar)); }
+  catch(e){ busy(false); toast(e.message && e.message !== "error" ? e.message : "No se pudo leer el ZIP", 4500); return; }
+  busy(false);
+  const { raiz, items } = normalizarZip(r.items);
+  if (!items.length){ toast("El ZIP no tiene archivos PDF", 4000); if (nueva){ if (NATIVO) Android.bibQuitar(bibId); else IDB.bibQuitar(bibId + "/"); } return; }
+  let lista = items;
+  if (!nueva && !reemplazar){ const prev = (LS.get("bib.lista." + bibId, null) || { items: [] }).items, clave = x => (x.ruta || "") + "|" + x.nombre;
+    const nuevos = new Set(items.map(clave)); lista = prev.filter(x => !nuevos.has(clave(x))).concat(items); }
+  if (nueva) BIB.fuentes = BIB.fuentes.concat([{ id: bibId, tipo: "zip", nombre: raiz || nombreZip(nombres[0]) }]);
+  LS.set("bib.lista." + bibId, { t: Date.now(), items: lista });
+  BIB.dir = null; show("scr-bib"); renderBib();
+  toast(`${items.length} pauta${items.length > 1 ? "s" : ""} cargada${items.length > 1 ? "s" : ""}${r.otros ? (r.otros > 1 ? ` · ${r.otros} archivos que no son PDF se omitieron` : " · 1 archivo que no es PDF se omitió") : ""}`, 4000);
+}
+let ZIP_DESTINO = null;
+function elegirZip(destino){
+  ZIP_DESTINO = destino || null;
+  if (NATIVO){ Android.elegirZipBib(); return; }
+  const i = document.createElement("input"); i.type = "file"; i.accept = ".zip,application/zip,application/x-zip-compressed"; i.multiple = true;
+  i.onchange = () => { const fs = [...i.files]; if (fs.length) procesarZips(fs, fs.map(f => f.name), ZIP_DESTINO); };
+  i.click();
+}
+window.onZipElegidos = function(json){ let l = []; try { l = JSON.parse(json); } catch(e){} if (l.length) procesarZips(l.map(x => x.uri), l.map(x => x.nombre), ZIP_DESTINO); };
+function menuZip(f){
+  sheet(`<div class="grab"></div><h3>${esc(f.nombre)}</h3>
+    <button class="btn big pri" id="zRep">Reemplazar con un ZIP nuevo</button>
+    <div class="hint" style="margin:2px 0 10px">Borra las pautas de esta biblioteca y carga las del ZIP nuevo.</div>
+    <button class="btn big" id="zAdd">Sumar otro ZIP</button>
+    <div class="hint" style="margin:2px 0 10px">Por ejemplo, la segunda parte cuando Drive divide la carpeta (…-002.zip).</div>
+    <button class="btn big" data-close>Cancelar</button>`);
+  $("#zRep").onclick = () => { closeSheet(); elegirZip({ id: f.id, reemplazar: true }); };
+  $("#zAdd").onclick = () => { closeSheet(); elegirZip({ id: f.id, reemplazar: false }); };
+}
+/* ZIP recibido con "Abrir con / Compartir → Pautas OT" */
+window.onZipRecibido = function(){
+  if (!NATIVO) return; let l = []; try { l = JSON.parse(Android.zipsPendientes() || "[]"); } catch(e){}
+  if (!l.length) return;
+  if (!terminosOk()){ toast("Acepta los términos para cargar pautas"); return; }
+  const srcs = l.map(x => x.split("|")[0]), nombres = l.map(x => x.split("|").slice(1).join("|"));
+  const zs = BIB.fuentes.filter(f => f.tipo === "zip");
+  if (!zs.length){ procesarZips(srcs, nombres, null); return; }
+  sheet(`<div class="grab"></div><h3>ZIP de pautas</h3><div class="m" style="margin-bottom:8px">${esc(nombres.join(", "))}</div>
+    <button class="btn big pri" data-zd="">Biblioteca nueva</button>
+    ${zs.map(f => `<button class="btn big" data-zd="${f.id}|1">Reemplazar "${esc(f.nombre)}"</button><button class="btn big" data-zd="${f.id}|0">Sumar a "${esc(f.nombre)}"</button>`).join("")}`);
+  $$("[data-zd]").forEach(b => b.onclick = () => { closeSheet(); const [id, rp] = b.dataset.zd.split("|"); procesarZips(srcs, nombres, id ? { id, reemplazar: rp === "1" } : null); });
+};
 function agregarFuente(f){ f.id = "b" + Date.now().toString(36); BIB.fuentes = BIB.fuentes.concat([f]); renderBib(); refrescarFuente(f); }
 window.onCarpetaBib = function(uri, nombre){ if (uri) agregarFuente({ tipo: "carpeta", nombre: nombre || "Carpeta", ref: uri }); };
 $("#btnBibAdd").onclick = () => {
   sheet(`<div class="grab"></div><h3>Agregar biblioteca</h3>
-    <button class="btn big" id="aCarp">Carpeta del teléfono</button>
-    <div class="hint" style="margin:2px 0 10px">Elige una carpeta con pautas en PDF (también lee sus subcarpetas).</div>
-    <label class="f" style="margin-top:0">Enlace de Google Drive</label>
-    <input type="url" id="aUrl" placeholder="https://drive.google.com/drive/folders/…">
-    <label class="f">Nombre (opcional)</label>
-    <input type="text" id="aNom" placeholder="Ej: Pautas instrumentación">
-    <div class="hint" style="margin:4px 0 10px">La carpeta debe estar compartida como "Cualquier persona con el enlace". También sirve el enlace a un solo PDF.</div>
-    <button class="btn pri big" id="aOk">Agregar enlace</button>
+    ${NATIVO ? `<button class="btn big" id="aCarp">Carpeta del teléfono</button>
+    <div class="hint" style="margin:2px 0 12px">Elige una carpeta con pautas en PDF (también lee sus subcarpetas).</div>` : ""}
+    <button class="btn big" id="aZip">Archivo ZIP</button>
+    <div class="hint" style="margin:2px 0 12px">Por ejemplo, la carpeta de pautas descargada desde Drive. La app guarda los PDF y respeta las carpetas. Si Drive la dividió en varios ZIP, elígelos todos juntos.</div>
     <button class="btn big" data-close>Cancelar</button>`);
-  if (!NATIVO){ $("#aCarp").style.display = "none"; $("#aCarp").nextElementSibling.style.display = "none"; }
-  $("#aCarp").onclick = () => { closeSheet(); Android.elegirCarpetaBib(); };
-  $("#aOk").onclick = () => {
-    const u = $("#aUrl").value.trim(), nom = $("#aNom").value.trim();
-    if (!/^https?:\/\//i.test(u)){ toast("Pega un enlace que empiece con https://"); return; }
-    const t = driveTipo(u), id = driveId(u);
-    if (t === "carpeta" && id) agregarFuente({ tipo: "drive", nombre: nom || "Biblioteca Drive", ref: id });
-    else if (t === "archivo" && id) agregarFuente({ tipo: "url", nombre: nom || "Pauta Drive", ref: "drive:" + id });
-    else if (/google\./.test(u)){ toast("No reconocí el enlace de Drive"); return; }
-    else agregarFuente({ tipo: "url", nombre: nom || decodeURIComponent(u.split("?")[0].split("/").pop() || "Pauta"), ref: u });
-    closeSheet();
-  };
+  if ($("#aCarp")) $("#aCarp").onclick = () => { closeSheet(); Android.elegirCarpetaBib(); };
+  $("#aZip").onclick = () => { closeSheet(); elegirZip(null); };
 };
 $("#btnBib").onclick = () => abrirBib();
 
@@ -382,7 +468,7 @@ async function openOt(name){
     if (!b64) throw new Error("vacío");
     PDF = await pdfjsLib.getDocument({ data: b64ToBytes(b64) }).promise;
   } catch(e){ busy(false); toast("No se pudo abrir el PDF"); console.error(e); return; }
-  FILE = name; PAGES = []; let lines1 = [], words1 = null, W1 = 612; const OPS = []; let haySAP = false;
+  FILE = name; PAGES = []; let lines1 = [], words1 = null, W1 = 612; const OPS = []; let haySAP = false; SDCOLS = [];
   for (let n=1; n<=PDF.numPages; n++){
     const page = await PDF.getPage(n);
     const { words, w, h, lines } = await extractWords(page);
@@ -408,6 +494,18 @@ async function openOt(name){
       P.inicio = /ALCANCE\s+GENERAL\s+(DE\s+)?MANTENIMIENTO/i.test(text);
       if (P.inicio){ P.titulo = tituloPauta(words); P.campos = camposAlcance(words); }
       P.fin = detectFinales(words, w, hl);
+      // Status / Dur. (min): celda por actividad (3.2) o una para todo el bloque (3.1 / 3.3)
+      let sdc = detectStatusDur(words, w, hl);
+      if (P.checklist && SDCOLS.length && !sdc.some(c => c.hy > 0 && P.checklist.rows.some(r => r.y > c.top && r.y < c.bot)))
+        sdc = sdc.concat(statusDurCont(words, hl, P.checklist.rows.filter(r => !sdc.some(c => r.y > c.top && r.y < c.bot)), SDCOLS));
+      { const porFila = sdc.filter(c => P.checklist && P.checklist.rows.some(r => r.y > c.top && r.y < c.bot) && c.bot - c.top < 80);
+        if (porFila.length) SDCOLS = ["status", "dur"].map(t => porFila.find(c => c.tipo === t)).filter(Boolean).map(c => ({ tipo: c.tipo, l: c.l, r: c.r })); }
+      P.sd = sdc.map(c => {
+        const rs = P.checklist ? P.checklist.rows.filter(r => r.y > c.top && r.y < c.bot) : [];
+        const as = P.boxes ? P.boxes.rows.filter(r => /^a/.test(r.key) && r.y > c.top && r.y < c.bot) : [];
+        if (rs.length === 1 && !as.length) c.row = P.n + "-" + (rs[0].key || rs[0].item);
+        else if (as.length && !rs.length) c.grupo = as[0].grupo;
+        c.id = P.n + "-" + c.key; return c; }).filter(c => c.row || c.grupo);
       if (!P.otBox && hl.ot && hl.ot.length){ const b = hl.ot[0]; P.otBox = { x: b.x0 + 8, base: (b.y0 + b.y1)/2 + 3, fh: 8.5 }; } }
     PAGES.push(P); await ceder();
   }
@@ -537,7 +635,9 @@ function allInterv(){ const out=[]; PAGES.forEach(p => p.interv && p.interv.forE
 function allEpp(){ const out=[]; PAGES.forEach(p => p.epp && p.epp.rows.forEach(r => out.push({p, r, key: p.n+"-"+r.key}))); return out; }
 function obsEntries(){
   const list = [];
-  allRows().forEach(({r,key}) => { const c = S.checks[key]; if (c && c.estado==="CD") list.push({ item: r.item, text: (c.detalle||"").trim(), auto:true, key }); });
+  allRows().forEach(({r,key}) => { const c = S.checks[key]; if (c && c.estado==="CD"){
+    const fo = fotosDef(key).map(id => infoFoto(id).obs).filter(Boolean);
+    list.push({ item: r.item, text: [(c.detalle||"").trim()].concat(fo).filter(Boolean).join(" · "), auto:true, key }); } });
   S.obsExtra.forEach((o,i) => { if ((o.text||"").trim() && (o.g ?? 0) === (ACTIVO ?? 0)) list.push({ item:o.item, text:o.text, idx:i }); });
   return list;
 }
@@ -558,6 +658,200 @@ function footNext(label, fn, extra=""){
 }
 const nextStep = () => { step = Math.min(STEPS.length-1, step+1); renderStep(); };
 
+/* --- Fotos por actividad (sin necesidad de defecto). Se guardan en IndexedDB, no en el estado de la OT --- */
+const FOTO_MAX = 4, FOTO_URL = {};
+/* cada foto puede ser "normal" o "con defecto" (con su observación), sin depender del orden */
+const infoFoto = id => ((S.fotoInfo || {})[id] || {});
+function setInfoFoto(id, inf){ S.fotoInfo = S.fotoInfo || {}; if (inf && inf.def) S.fotoInfo[id] = { def: true, obs: (inf.obs || "").trim() }; else delete S.fotoInfo[id]; }
+const fotosDef = key => fotosDe(key).filter(id => infoFoto(id).def);
+/* bloque Normal / Con defecto + observación (en el editor y al tocar una foto) */
+function etiquetaHtml(inf){
+  return `<div class="etq"><div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+    <button class="ok ${inf.def?"":"on"}" data-etq="0">Normal</button><button class="def ${inf.def?"on":""}" data-etq="1">Con defecto</button></div>
+    <div class="ta-wrap etq-obs" style="${inf.def?"":"display:none"}"><textarea id="etqObs" placeholder="Observación de esta foto (ej.: sensor LT-2 con conector suelto)">${esc(inf.obs||"")}</textarea>
+    ${NATIVO ? `<button class="mic" id="etqMic" aria-label="Dictar por voz"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>` : ""}</div></div>`;
+}
+function enlazarEtiqueta(inf){
+  $$("[data-etq]").forEach(b => b.onclick = () => { inf.def = b.dataset.etq === "1"; $$("[data-etq]").forEach(x => x.classList.toggle("on", x === b)); $(".etq-obs").style.display = inf.def ? "" : "none"; if (inf.def) setTimeout(() => { const t = $("#etqObs"); if (t) t.focus(); }, 50); });
+  const ta = $("#etqObs"); ta.oninput = () => inf.obs = ta.value;
+  const mic = $("#etqMic"); if (mic) mic.onclick = () => { window.__dictado = t => { const base = ta.value.trim(); if (!base || /[.!?]$/.test(base)) t = t.charAt(0).toUpperCase() + t.slice(1); ta.value = (base ? base + " " : "") + t; inf.obs = ta.value; }; Android.dictar("etq"); };
+}
+/* si una foto queda con defecto, la actividad pasa a "Con defecto" */
+function actividadConDefecto(key){
+  const c = S.checks[key] || (S.checks[key] = {});
+  if (c.estado === "CD") return false;
+  const row = allRows().find(x => x.key === key), sd = row ? subDef(row.p) : null;
+  c.estado = "CD"; if (sd && c.sub === sd) c.sub = null; return true;
+}
+const fotosDe = key => ((S.fotosAct || {})[key] || []);
+function fotosActHtml(key){
+  const ids = fotosDe(key);
+  const fd = (S.checks[key] || {}).estado === "CD" && S.fotos[key];
+  return `<div class="fotos-act">${fd ? `<button class="fth fdef" data-det="${key}" aria-label="Foto del defecto"><img src="${S.fotos[key]}" alt=""><i>${((allRows().find(x => x.key === key) || {}).p || {checklist:{}}).checklist.mode === "ok" ? "Obs." : "Defecto"}</i></button>` : ""}${ids.map((id, i) => `<button class="fth ${infoFoto(id).def ? "fdef" : ""}" data-fver="${key}|${id}" aria-label="Ver foto ${i+1}"><img data-fid="${id}" alt="">${infoFoto(id).def ? "<i>Defecto</i>" : ""}</button>`).join("")}
+    ${ids.length < FOTO_MAX ? `<button class="fadd" data-fadd="${key}" aria-label="Agregar foto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>${ids.length ? "" : "<span>Foto</span>"}</button>` : ""}</div>`;
+}
+async function fotoBlob(id){ try { return await IDB.bibLeer("foto:" + id); } catch(e){ return null; } }
+async function fotoUrl(id){ if (FOTO_URL[id]) return FOTO_URL[id]; const b = await fotoBlob(id); if (!b) return ""; return (FOTO_URL[id] = URL.createObjectURL(b)); }
+function hidratarFotos(){ $$("img[data-fid]").forEach(async im => { if (!im.src) im.src = await fotoUrl(im.dataset.fid); }); }
+async function reducirFoto(dataUrl, max = 1280, q = 0.8){
+  const im = await loadImg(dataUrl); if (!im) return null;
+  const k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement("canvas");
+  c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+  return new Promise(r => c.toBlob(r, "image/jpeg", q));
+}
+async function agregarFotoAct(key, foto, etq){
+  closeSheet();
+  const b = foto instanceof Blob ? foto : await reducirFoto(foto); if (!b){ toast("No se pudo leer la foto"); return; }
+  const id = (FILE || "ot").replace(/[^\w.-]/g, "_").slice(0, 60) + ":" + Date.now().toString(36);
+  try { await IDB.bibPoner("foto:" + id, b); } catch(e){ toast("No se pudo guardar la foto"); return; }
+  S.fotosAct = S.fotosAct || {}; (S.fotosAct[key] = S.fotosAct[key] || []).push(id);
+  FOTO_URL[id] = URL.createObjectURL(b);
+  if (etq && etq.def){ setInfoFoto(id, etq); if (actividadConDefecto(key)) toast("La actividad quedó \"Con defecto\""); changed(); return; }
+  // solo se actualiza la fila de fotos de esa actividad (sin redibujar toda la lista)
+  const add = document.querySelector(`[data-fadd="${CSS.escape(key)}"]`), tira = add && add.parentElement;
+  if (tira){ const t = document.createElement("div"); t.innerHTML = fotosActHtml(key); tira.replaceWith(t.firstElementChild); hidratarFotos(); changed(true, false); }
+  else changed();
+}
+function quitarFotoAct(key, id){
+  setInfoFoto(id, null);
+  S.fotosAct[key] = fotosDe(key).filter(x => x !== id); if (!S.fotosAct[key].length) delete S.fotosAct[key];
+  IDB.bib("readwrite", st => st.delete("foto:" + id)).catch(() => {}); if (FOTO_URL[id]){ URL.revokeObjectURL(FOTO_URL[id]); delete FOTO_URL[id]; }
+  changed();
+}
+function borrarFotosOt(name){ IDB.bibQuitar("foto:" + name.replace(/[^\w.-]/g, "_").slice(0, 60) + ":"); }
+$("#stepBody").addEventListener("click", async e => {
+  const ad = e.target.closest("[data-fadd]");
+  if (ad){ const key = ad.dataset.fadd; if (fotosDe(key).length >= FOTO_MAX){ toast("Máximo " + FOTO_MAX + " fotos por actividad"); return; }
+    pedirFoto((b, etq) => agregarFotoAct(key, b, etq), null, true); return; }
+  const fv = e.target.closest("[data-fver]");
+  if (fv){ const [key, id] = fv.dataset.fver.split("|"), url = await fotoUrl(id);
+    const inf = Object.assign({ def: false, obs: "" }, infoFoto(id));
+    sheet(`<div class="grab"></div><h3>Foto de la actividad</h3><img src="${url}" alt="" style="width:100%;border-radius:10px;margin:6px 0 10px">
+      ${etiquetaHtml(inf)}
+      <button class="btn big pri" id="fOk">Listo</button>
+      <button class="btn big" id="fEdit">Editar (marcar sobre la foto)</button>
+      <button class="btn big" id="fQuit" style="color:var(--def);border-color:#F0C9AE">Quitar foto</button><button class="btn big" data-close>Cerrar</button>`);
+    enlazarEtiqueta(inf);
+    $("#fOk").onclick = () => { const antes = !!infoFoto(id).def; setInfoFoto(id, inf); closeSheet();
+      if (inf.def && actividadConDefecto(key)) toast("La actividad quedó \"Con defecto\"");
+      if (antes !== !!inf.def || inf.def) changed(); };
+    $("#fQuit").onclick = () => { closeSheet(); quitarFotoAct(key, id); };
+    $("#fEdit").onclick = () => editarFoto(url, async b => {
+      closeSheet();
+      const nu = URL.createObjectURL(b), viejo = FOTO_URL[id]; FOTO_URL[id] = nu;
+      $$(`img[data-fid="${CSS.escape(id)}"]`).forEach(im => im.src = nu);
+      if (viejo) setTimeout(() => URL.revokeObjectURL(viejo), 1000);
+      try { await IDB.bibPoner("foto:" + id, b); } catch(e){ toast("No se pudo guardar la foto"); return; }
+      toast("Foto editada"); }, closeSheet); }
+});
+
+/* --- Editor de fotos: marcar con lápiz, círculo o flecha --- */
+const blobToDataURL = b => new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
+async function editarFoto(src, onSave, onCancel, nueva, etiqueta){
+  const im = await loadImg(src); if (!im){ toast("No se pudo abrir la foto"); return; }
+  const COLS = { rojo: "#E02424", amarillo: "#FFD400", blanco: "#FFFFFF" };
+  let tool = "lapiz", color = "rojo", trazos = [], actual = null;
+  sheet(`<div class="grab"></div><h3>Marcar la foto</h3>
+    <div class="ed-wrap"><canvas id="edC"></canvas></div>
+    <div class="ed-bar"><div class="seg ed-seg" style="grid-template-columns:repeat(4,minmax(0,1fr))">${[["lapiz","Lápiz"],["circulo","Círculo"],["flecha","Flecha"],["recorte","Recortar"]].map(([k,l]) => `<button class="ok ${k===tool?"on":""}" data-tool="${k}">${l}</button>`).join("")}</div>
+      <div class="ed-cols">${Object.entries(COLS).map(([k,v]) => `<button class="ed-col ${k===color?"on":""}" data-col="${k}" style="background:${v}" aria-label="Color ${k}"></button>`).join("")}
+      <button class="btn sm" id="edUndo">Deshacer</button></div></div>
+    ${etiqueta ? etiquetaHtml(etiqueta) : ""}
+    ${nueva && !etiqueta ? `<div class="hint" style="margin:-4px 0 0">Marca lo que quieras destacar, recórtala o guárdala tal cual.</div>` : ""}
+    <button class="btn pri big" id="edOk">${nueva ? "Guardar foto" : "Guardar"}</button><button class="btn big" id="edNo">${nueva ? "Descartar foto" : "Cancelar"}</button>`);
+  if (etiqueta) enlazarEtiqueta(etiqueta);
+  const cv = $("#edC"), wrap = cv.parentElement;
+  const maxW = wrap.clientWidth, maxH = Math.round(window.innerHeight * 0.55), k = Math.min(maxW / im.naturalWidth, maxH / im.naturalHeight);
+  const dw = Math.round(im.naturalWidth * k), dh = Math.round(im.naturalHeight * k), dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.style.width = dw + "px"; cv.style.height = dh + "px"; cv.width = dw * dpr; cv.height = dh * dpr;
+  const ctx = cv.getContext("2d");
+  const pintar = (g, W, H, lista) => {
+    const lw = Math.max(3, W * 0.008);
+    for (const t of lista){
+      if (t.t === "recorte") continue;
+      g.strokeStyle = COLS[t.c]; g.lineWidth = lw; g.lineCap = "round"; g.lineJoin = "round";
+      g.shadowColor = "rgba(0,0,0,.35)"; g.shadowBlur = lw * 0.6;
+      const P = t.p.map(q => [q[0] * W, q[1] * H]); if (!P.length) continue;
+      g.beginPath();
+      if (t.t === "lapiz"){ g.moveTo(P[0][0], P[0][1]); for (let i = 1; i < P.length; i++) g.lineTo(P[i][0], P[i][1]); if (P.length === 1) g.lineTo(P[0][0] + 0.1, P[0][1]); }
+      else if (t.t === "circulo"){ const a = P[0], b = P[P.length-1]; g.ellipse((a[0]+b[0])/2, (a[1]+b[1])/2, Math.max(2, Math.abs(b[0]-a[0])/2), Math.max(2, Math.abs(b[1]-a[1])/2), 0, 0, Math.PI*2); }
+      else { const a = P[0], b = P[P.length-1], ang = Math.atan2(b[1]-a[1], b[0]-a[0]), L = lw * 4.5;
+        g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.moveTo(b[0], b[1]); g.lineTo(b[0] - L*Math.cos(ang - 0.45), b[1] - L*Math.sin(ang - 0.45));
+        g.moveTo(b[0], b[1]); g.lineTo(b[0] - L*Math.cos(ang + 0.45), b[1] - L*Math.sin(ang + 0.45)); }
+      g.stroke(); g.shadowBlur = 0;
+    }
+  };
+  // recorte: el último rectángulo marcado con "Recortar" (se quita con Deshacer)
+  const rectDe = t => { if (!t || t.p.length < 2) return null; const [a, b] = t.p, r = { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
+    return (r.x1 - r.x0 > 0.04 && r.y1 - r.y0 > 0.04) ? r : null; };
+  const recorte = lista => { for (let i = lista.length - 1; i >= 0; i--) if (lista[i].t === "recorte"){ const r = rectDe(lista[i]); if (r) return r; } return null; };
+  const redibujar = () => {
+    const lista = actual ? trazos.concat([actual]) : trazos;
+    ctx.drawImage(im, 0, 0, cv.width, cv.height); pintar(ctx, cv.width, cv.height, lista);
+    const r = recorte(lista);
+    if (r){ const W = cv.width, H = cv.height; ctx.fillStyle = "rgba(0,0,0,.55)";
+      ctx.fillRect(0, 0, W, r.y0*H); ctx.fillRect(0, r.y1*H, W, H - r.y1*H); ctx.fillRect(0, r.y0*H, r.x0*W, (r.y1-r.y0)*H); ctx.fillRect(r.x1*W, r.y0*H, W - r.x1*W, (r.y1-r.y0)*H);
+      ctx.setLineDash([8, 6]); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(r.x0*W, r.y0*H, (r.x1-r.x0)*W, (r.y1-r.y0)*H); ctx.setLineDash([]); }
+  };
+  redibujar();
+  const pos = e => { const r = cv.getBoundingClientRect(); return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))]; };
+  cv.onpointerdown = e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); actual = { t: tool, c: color, p: [pos(e)] }; redibujar(); };
+  cv.onpointermove = e => { if (!actual) return; const q = pos(e); if (tool === "lapiz") actual.p.push(q); else actual.p[1] = q; redibujar(); };
+  cv.onpointerup = cv.onpointercancel = () => { if (actual){ trazos.push(actual); actual = null; redibujar(); } };
+  $$("[data-tool]").forEach(b => b.onclick = () => { tool = b.dataset.tool; $$("[data-tool]").forEach(x => x.classList.toggle("on", x === b)); });
+  $$("[data-col]").forEach(b => b.onclick = () => { color = b.dataset.col; $$("[data-col]").forEach(x => x.classList.toggle("on", x === b)); });
+  $("#edUndo").onclick = () => { trazos.pop(); redibujar(); };
+  $("#edNo").onclick = () => onCancel && onCancel();
+  let guardando = false;
+  $("#edOk").onclick = async () => {
+    if (guardando) return;                       // evita guardar dos veces
+    guardando = true;
+    const bt = $("#edOk"); bt.disabled = true; bt.innerHTML = `<span class="spin" style="width:18px;height:18px;border-width:2px;vertical-align:-3px;margin-right:8px"></span>Guardando…`;
+    $("#edNo").disabled = true;
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // que se vea el "Guardando…" antes del trabajo
+    try {
+      if (!trazos.length){
+        if (!nueva){ if (etiqueta) onSave(null); else onCancel && onCancel(); return; }
+        onSave(await (await fetch(src)).blob()); return;
+      }
+      const m = Math.min(1, 1280 / Math.max(im.naturalWidth, im.naturalHeight)), out = document.createElement("canvas");
+      out.width = Math.round(im.naturalWidth * m); out.height = Math.round(im.naturalHeight * m);
+      const g = out.getContext("2d"); g.drawImage(im, 0, 0, out.width, out.height); pintar(g, out.width, out.height, trazos);
+      let fin = out; const r = recorte(trazos);
+      if (r){ fin = document.createElement("canvas"); fin.width = Math.round((r.x1 - r.x0) * out.width); fin.height = Math.round((r.y1 - r.y0) * out.height);
+        fin.getContext("2d").drawImage(out, r.x0 * out.width, r.y0 * out.height, fin.width, fin.height, 0, 0, fin.width, fin.height); }
+      // toDataURL es más rápido que toBlob en el WebView de Android
+      onSave(await (await fetch(fin.toDataURL("image/jpeg", 0.8))).blob());
+    } catch(e){ guardando = false; bt.disabled = false; bt.textContent = nueva ? "Guardar foto" : "Guardar"; $("#edNo").disabled = false; toast("No se pudo guardar"); }
+  };
+}
+
+/* --- Status y duración --- */
+const STATUS_OPC = ["Revisado", "OK", "En funcionamiento", "No aplica", "Detenido", "En falla", "Fuera de servicio"];
+const allSD = () => PAGES.flatMap(P => P.sd || []);
+function sdHtml(cs){
+  const st = cs.find(c => c.tipo === "status"), du = cs.find(c => c.tipo === "dur");
+  if (!st && !du) return "";
+  S.stat = S.stat || {}; S.dur = S.dur || {};
+  return `<div class="sdrow">${st ? `<select data-stat="${st.id}"><option value="">Status…</option>${STATUS_OPC.map(o => `<option ${S.stat[st.id]===o?"selected":""}>${o}</option>`).join("")}</select>` : ""}
+    ${du ? `<label class="min"><input type="text" inputmode="numeric" maxlength="4" data-dur="${du.id}" value="${esc(S.dur[du.id]||"")}" placeholder="—"><span>min</span></label>` : ""}</div>`;
+}
+$("#stepBody").addEventListener("change", e => {
+  const t = e.target; if (!t.dataset || !t.dataset.stat) return;
+  S.stat = S.stat || {}; if (t.value) S.stat[t.dataset.stat] = t.value; else delete S.stat[t.dataset.stat];
+  changed(true, false);
+});
+$("#stepBody").addEventListener("input", e => {
+  const t = e.target; if (!t.dataset || !t.dataset.dur) return;
+  S.dur = S.dur || {}; const v = t.value.replace(/[^\d.,]/g, ""); if (v !== t.value) t.value = v;
+  if (v) S.dur[t.dataset.dur] = v; else delete S.dur[t.dataset.dur];
+  changed(true, false);
+});
+
+function sdBloque(g){ if (!g) return ""; const cs = allSD().filter(c => c.grupo === g); if (!cs.length) return "";
+  const grupos = Object.values(cs.reduce((m, c) => { const k = c.id.split("-")[0] + "|" + Math.round(c.top); (m[k] = m[k] || []).push(c); return m; }, {}));
+  return grupos.map(x => `<div class="sdbloque"><span>Status y duración del bloque</span>${sdHtml(x)}</div>`).join(""); }
 /* --- EPP --- */
 function renderEpp(){
   const epp = allEpp(), bxAll = allBoxes(), n = epp.filter(({key}) => S.epp[key]).length;
@@ -573,10 +867,10 @@ function renderEpp(){
   if (bx.length) html += `<div class="head-row" style="margin-top:${epp.length?22:0}px"><div><h2>${soloAplica ? "Actividades previas y de cierre" : "Área y equipos inspeccionados"}</h2><div class="m">${nb} marcados · toca ${soloAplica ? "las que aplican" : "los que corresponden"}</div></div>${soloAplica ? `<button class="btn outline sm" id="todasAplican">Todas aplican</button>` : ""}</div>
     ${(() => { let out = "", g = null, open = false;
       for (const {r,key,keys} of bx){
-        if (r.grupo !== g){ if (open) out += "</div>"; g = r.grupo; if (g) out += `<div class="sec-t" style="margin:14px 2px 8px">${esc(g)}</div>`; out += `<div class="chips">`; open = true; }
+        if (r.grupo !== g){ if (open){ out += "</div>"; out += sdBloque(g); } g = r.grupo; if (g) out += `<div class="sec-t" style="margin:14px 2px 8px">${esc(g)}</div>`; out += `<div class="chips">`; open = true; }
         out += `<button class="chip ${S.boxes[key]?"on":""}" data-box="${keys.join("|")}">${esc(r.label)}</button>`;
       }
-      return out + (open ? "</div>" : ""); })()}`;
+      return out + (open ? "</div>" + sdBloque(g) : ""); })()}`;
   $("#stepBody").innerHTML = html;
   footNext(STEPS[step+1] ? `Siguiente: ${STEPS[step+1].l.toLowerCase()}` : "Siguiente", () => {
     if (epp.length){ perfil.eppUsual = epp.filter(({key}) => S.epp[key]).map(({r}) => r.key); guardarPerfil(); } nextStep(); });
@@ -614,19 +908,23 @@ function renderAct(){
     const cls = c.estado === "CD" || c.estado === "NR" ? "def" : (completo ? "done" : "");
     const est = p.checklist.estados || [{k:"SD",label:"Sin defecto"},{k:"CD",label:"Con defecto"}];
     const foto = S.fotos[key];
-    const det = c.estado === "CD" ? `<button class="detbox" data-det="${key}">${foto?`<img src="${foto}" alt="">`:""}<span>${c.detalle ? esc(c.detalle) : '<span class="ph">Toca para describir el defecto</span>'}</span></button>` : "";
+    const foObs = c.estado === "CD" ? fotosDef(key).map(id => infoFoto(id).obs).filter(Boolean) : [];
+    const det = c.estado === "CD" ? `<button class="detbox" data-det="${key}"><span>${c.detalle || foObs.length ? esc([c.detalle].concat(foObs).filter(Boolean).join(" · ")) : '<span class="ph">Toca para describir el defecto</span>'}</span></button>` : "";
     return `<div class="it ${cls}">
       <div class="h"><span class="n">${esc(r.item)}</span><div style="display:flex;flex-direction:column;gap:2px"><span class="c">${esc(r.comp||"")}</span>${extraHtml(r, esComun)}<span class="d">${esc(r.desc||"")}</span></div></div>
       ${r.limite ? `<span class="x"><b>Límite aceptable:</b> ${esc(r.limite)}</span>` : ""}
       ${r.medidas ? `<div class="medidas">${r.medidas.map(m => `<label class="med"><span>${esc(m.label)}</span><input type="text" inputmode="decimal" data-med="${key}#${m.id}" value="${esc((S.medidas||{})[key+"#"+m.id]||"")}" placeholder="—">${m.unidad ? `<em>${esc(m.unidad)}</em>` : ""}</label>`).join("")}</div>` : ""}
       <div class="seg" style="grid-template-columns:repeat(${est.length},minmax(0,1fr))">${est.map(e => b("estado", e.k, e.label)).join("")}</div>
+      ${sdHtml(allSD().filter(x => x.row === key))}
       ${det}
+      ${fotosActHtml(key)}
       ${sc.length ? `<div class="subrow"><span>${esc(p.checklist.subLabel)}</span><div class="seg" style="grid-template-columns:repeat(${sc.length},minmax(0,1fr))">${sc.map(x => b("sub", x.k, x.label)).join("")}</div></div>` : ""}
     </div>`;
   };
   const pend = rows.filter(({key}) => !(S.checks[key]||{}).estado).length;
   $("#stepBody").innerHTML = `<div class="head-row"><div><h2>Actividades</h2><div class="m">${p.done} de ${p.total} completas</div></div>
-      ${pend ? `<button class="btn outline sm" id="restoSD">Resto sin defecto</button>` : ""}</div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">${pend ? `<button class="btn outline sm" id="restoSD">Resto sin defecto</button>` : ""}
+      ${allSD().some(c => c.row && c.tipo === "status") ? `<button class="btn outline sm" id="statTodos">Status a todos</button>` : ""}</div></div>
     ${allInterv().map(({key}, i, arr) => `<div class="card"><b style="font-size:15px;color:var(--pri-dk)">Tipo de intervención${arr.length>1?" "+(i+1):""}</b>
       <div class="seg two" style="margin-top:8px">${[["COR","Correctiva"],["PRE","Preventiva"]].map(([k,l]) => `<button class="ok ${(S.interv||{})[key]===k?"on":""}" data-interv="${key}" data-k="${k}">${l}</button>`).join("")}</div></div>`).join("")}
     ${comunes.length ? `<div class="card comun">${comunes.map(e => `<div><b>${esc(e.t)}</b><span>${esc(e.v)}</span></div>`).join("")}<div class="m">Aplica a los ${rows.length} ítems</div></div>` : ""}
@@ -637,6 +935,14 @@ function renderAct(){
     rows.forEach(({p, key}) => { const c = S.checks[key] || (S.checks[key]={}); if (!c.estado){ c.estado = "SD"; if (!c.sub && subDef(p)) c.sub = subDef(p); } });
     changed(); toast("Ítems pendientes marcados Sin defecto");
   };
+  const stt = $("#statTodos"); if (stt) stt.onclick = () => {
+    sheet(`<div class="grab"></div><h3>Status a todos</h3><div class="m" style="margin-bottom:8px">Se pone en las actividades que aún no tienen status.</div>
+      ${STATUS_OPC.map(o => `<button class="btn big" data-st="${o}">${o}</button>`).join("")}<button class="btn big" data-close>Cancelar</button>`);
+    $$("[data-st]").forEach(bt => bt.onclick = () => { S.stat = S.stat || {}; let n = 0;
+      allSD().filter(c => c.row && c.tipo === "status").forEach(c => { if (!S.stat[c.id]){ S.stat[c.id] = bt.dataset.st; n++; } });
+      closeSheet(); changed(); toast(n ? `Status "${bt.dataset.st}" en ${n} actividad${n>1?"es":""}` : "Todas ya tenían status"); });
+  };
+  hidratarFotos();
   $("#addObs").onclick = () => editObs(-1);
   $$("[data-obs]").forEach(b => b.onclick = () => editObs(+b.dataset.obs));
   const falta = rows.filter(({p, key}) => { const c = S.checks[key]||{}; return !c.estado || (!c.sub && subCols(p).length); }).length;
@@ -652,6 +958,13 @@ function setCheck(key, g, k){
   const c = S.checks[key] || (S.checks[key] = {});
   const row = allRows().find(x => x.key === key), sd = row ? subDef(row.p) : null;
   const was = c[g];
+  if (g === "estado" && k !== "CD" && was !== k && fotosDef(key).length){
+    const n = fotosDef(key).length;
+    sheet(`<div class="grab"></div><h3>Fotos con defecto</h3><div class="m" style="margin-bottom:10px">Esta actividad tiene ${n} foto${n>1?"s":""} marcada${n>1?"s":""} con defecto.</div>
+      <button class="btn big pri" id="avNorm">Marcar las fotos como normales y seguir</button><button class="btn big" data-close>Cancelar</button>`);
+    $("#avNorm").onclick = () => { fotosDef(key).forEach(id => setInfoFoto(id, null)); closeSheet(); setCheck(key, g, k); };
+    return;
+  }
   c[g] = was === k ? null : k;
   if (g === "estado" && c.estado === "SD" && !c.sub && sd) c.sub = sd;
   if (g === "estado" && c.estado === "CD" && was !== "CD"){ if (sd && c.sub === sd) c.sub = null; changed(); openDefect(key); return; }
@@ -677,7 +990,7 @@ function openDefect(key){
         <div class="seg" style="grid-template-columns:repeat(${subCols(row.p).length},minmax(0,1fr))">${subCols(row.p).map(x => `<button class="${btnCls(x.k)} ${sub===x.k?"on":""}" data-sub="${x.k}">${esc(x.label)}</button>`).join("")}</div></div>` : ""}
       ${conAna && (sub === "SI" || !subCols(row.p).length) ? `<div><label class="f" style="margin-top:0" for="avisoTxt">N° aviso subsecuente${subCols(row.p).length ? "" : " (si lo generaste)"}</label>
         <input type="text" id="avisoTxt" inputmode="numeric" value="${esc(aviso)}" placeholder="Ej: 4871503"></div>` : ""}
-      ${foto ? `<div class="fotoprev"><img src="${foto}" alt="Foto del hallazgo"><button class="btn sm" id="fotoDel">Quitar</button></div>` :
+      ${foto ? `<div class="fotoprev"><img src="${foto}" alt="Foto del hallazgo"><div style="display:flex;flex-direction:column;gap:6px"><button class="btn sm" id="fotoEdit">Editar</button><button class="btn sm" id="fotoDel">Quitar</button></div></div>` :
         true ? `<button class="btn dash" id="fotoBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Adjuntar foto del hallazgo</button>` : ""}
       <button class="btn pri big" id="detOk">${row.p.checklist.mode === "ok" ? "Guardar observación" : "Guardar defecto"}</button>`);
     const ta = $("#detTxt"); ta.oninput = () => { txt = ta.value; };
@@ -690,8 +1003,9 @@ function openDefect(key){
     });
     $$("[data-sub]").forEach(b => b.onclick = () => { sub = sub === b.dataset.sub ? null : b.dataset.sub; draw(); });
     const mic = $("#mic"); if (mic) mic.onclick = () => { window.__dictado = t => { const base = txt.trim(); if (!base || /[.!?]$/.test(base)) t = t.charAt(0).toUpperCase() + t.slice(1); txt = (base ? base + " " : "") + t; draw(); }; Android.dictar("det"); };
-    const fb = $("#fotoBtn"); if (fb) fb.onclick = () => { window.__foto = url => { foto = url; draw(); }; if (NATIVO) Android.foto("det"); else fotoWeb(); };
+    const fb = $("#fotoBtn"); if (fb) fb.onclick = () => pedirFoto(async b => { foto = await blobToDataURL(b); draw(); }, draw);
     const fd = $("#fotoDel"); if (fd) fd.onclick = () => { foto = null; draw(); };
+    const fe = $("#fotoEdit"); if (fe) fe.onclick = () => editarFoto(foto, async b => { foto = await blobToDataURL(b); draw(); }, draw);
     $("#detOk").onclick = () => { c.estado = "CD"; c.detalle = txt.trim(); c.sub = sub; c.aviso = aviso.trim(); if (foto) S.fotos[key] = foto; else delete S.fotos[key]; closeSheet(); changed(); };
   };
   draw();
@@ -801,20 +1115,84 @@ async function renderEnviar(){
   $("#stepFoot").innerHTML = "";
   await ceder();
   try { OUTS = await generarImagenes(); } catch(e){ console.error(e); $("#stepBody").innerHTML = `<div class="warn">No se pudieron generar las imágenes.</div>`; return; }
-  const p = progreso();
+  renderEnviarUI();
+}
+function renderEnviarUI(){
+  const p = progreso(), fmt = perfil.envio === "pdf" ? "pdf" : "img";
   $("#stepBody").innerHTML = `
     ${!S.ot ? `<div class="warn" style="display:flex;gap:10px;align-items:center"><span style="flex:1">La hoja va sin N° de OT.</span><button class="btn sm" id="btnPonerOt">Poner N° OT</button></div>` : ""}
     ${p.done < p.total ? `<div class="warn">Atención: faltan ${p.total - p.done} actividades por completar.</div>` : ""}
-    <div class="prev">${OUTS.map(o => `<figure><img src="${o.url}" alt=""><figcaption>${esc(o.cap)}</figcaption></figure>`).join("")}</div>
-    <div class="hint" style="margin:6px 0 12px">${OUTS.length} imagen${OUTS.length>1?"es":""} · desliza para ver</div>`;
+    <div class="prev" id="prevBox">${OUTS.map((o, i) => `<figure><div class="zbox"><img src="${o.url}" alt=""></div><figcaption>${esc(o.cap)}</figcaption></figure>`).join("")}</div>
+    <div class="hint" style="margin:6px 0 4px">${OUTS.length} ${OUTS.length>1?"imágenes":"imagen"} · desliza para ver</div>`;
+  const sel = selEnvio(), ck = `<span class="ck"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>`;
   $("#stepFoot").innerHTML = `
-    <button class="btn ok huge" id="wa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-13.4 7.9L3 21l1.2-4.4A9 9 0 1 1 21 12z"/></svg>Enviar por WhatsApp</button>
+    <div class="envio2">
+      <button class="tg ${sel.img?"on":""}" data-sel="img" role="checkbox" aria-checked="${sel.img}">${ck}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>Imágenes</button>
+      <button class="tg ${sel.pdf?"on":""}" data-sel="pdf" role="checkbox" aria-checked="${sel.pdf}">${ck}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>PDF</button>
+      <button class="send" id="wa" aria-label="Enviar por WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-2.5-6.5z"/><path d="M11.5 13.5L20 4"/></svg><span class="w"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-11.9 7L4 20l1.1-4A8 8 0 1 1 20 12z"/><path d="M9 9.5c.3 2 2.2 4 4.5 4.6l1-1 1.6.7-.4 1.3c-3 .3-6.6-3-6.9-6l1.3-.5.8 1.5z"/></svg></span></button>
+    </div>
+    <div class="selmsg" id="selMsg"></div>
     <div class="grid2"><button class="btn" id="pdfBtn">Guardar PDF</button><button class="btn" id="otro">Otro medio</button></div>`;
+  const msgSel = () => { const s1 = selEnvio(), n = OUTS.length;
+    $("#selMsg").textContent = s1.img && s1.pdf ? `Se envían ${n} ${n>1?"imágenes":"imagen"} y además 1 PDF` : s1.img ? `Se envía${n>1?"n":""} ${n} ${n>1?"imágenes":"imagen"}` : "Se envía 1 PDF con todas las hojas y fotos"; };
+  msgSel();
+  $$("[data-sel]").forEach(b => b.onclick = () => {
+    const s1 = Object.assign({}, selEnvio()), k = b.dataset.sel, otro = k === "img" ? "pdf" : "img";
+    if (s1[k] && !s1[otro]){ $("#selMsg").textContent = "Debe quedar al menos una opción marcada"; return; }
+    s1[k] = !s1[k]; perfil.envioSel = s1; guardarPerfil();
+    b.classList.toggle("on", s1[k]); b.setAttribute("aria-checked", s1[k]); msgSel(); });
+  $$("#prevBox .zbox").forEach(zoomEnSitio);
   { const b = $("#btnPonerOt"); if (b) b.onclick = pedirOt; }
   $("#wa").onclick = () => compartir("whatsapp");
   $("#otro").onclick = () => compartir("otro");
   $("#pdfBtn").onclick = guardarPdf;
 }
+/* zoom dentro de la misma vista previa: pellizcar para acercar, un dedo para mover, doble toque para volver.
+   Encabezado y botones no se mueven; mientras hay zoom, el carrusel no cambia de hoja. */
+function zoomEnSitio(box){
+  const img = box.querySelector("img"), prev = $("#prevBox"); let z = 1;
+  const zoom = (nz, cxr = 0.5, cyr = 0.5) => {
+    nz = Math.max(1, Math.min(5, nz));
+    const fig = box.closest("figure");
+    if (nz > 1 && z === 1){ fig.style.height = fig.offsetHeight + "px"; box.style.height = box.clientHeight + "px"; box.style.flex = "none"; box.classList.add("on"); prev.style.overflowX = "hidden"; }
+    const px = box.scrollLeft + cxr * box.clientWidth, py = box.scrollTop + cyr * box.clientHeight, f = nz / z;
+    z = nz; img.style.width = (z * 100) + "%";
+    if (z === 1){ box.classList.remove("on"); box.style.height = ""; box.style.flex = ""; fig.style.height = ""; prev.style.overflowX = ""; box.scrollLeft = 0; box.scrollTop = 0; return; }
+    box.scrollLeft = px * f - cxr * box.clientWidth; box.scrollTop = py * f - cyr * box.clientHeight;
+  };
+  const pts = new Map(); let d0 = 0, z0 = 1, ultimo = 0;
+  const rel = (x, y) => { const r = box.getBoundingClientRect(); return [(x - r.left) / r.width, (y - r.top) / r.height]; };
+  box.addEventListener("pointerdown", e => {
+    pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 2){ const [a, b] = [...pts.values()]; d0 = Math.hypot(a[0]-b[0], a[1]-b[1]); z0 = z; }
+    else if (pts.size === 1){ const t = Date.now(); if (t - ultimo < 300){ const [cx, cy] = rel(e.clientX, e.clientY); zoom(z > 1.2 ? 1 : 2.5, cx, cy); ultimo = 0; } else ultimo = t; }
+  });
+  box.addEventListener("pointermove", e => {
+    if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 2 && d0){ e.preventDefault(); const [a, b] = [...pts.values()], d = Math.hypot(a[0]-b[0], a[1]-b[1]); const [cx, cy] = rel((a[0]+b[0])/2, (a[1]+b[1])/2); zoom(z0 * d / d0, cx, cy); }
+  });
+  const fin = e => { pts.delete(e.pointerId); if (pts.size < 2) d0 = 0; };
+  box.addEventListener("pointerup", fin); box.addEventListener("pointercancel", fin);
+  // con zoom: si ya estás en el borde de la hoja y deslizas otra vez hacia ese lado, pasa a la hoja siguiente/anterior
+  let tx0 = null, bordeD = false, bordeI = false;
+  box.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1 || z <= 1){ tx0 = null; return; }
+    tx0 = e.touches[0].clientX; bordeD = box.scrollLeft >= box.scrollWidth - box.clientWidth - 2; bordeI = box.scrollLeft <= 1;
+  }, { passive: true });
+  box.addEventListener("touchend", e => {
+    if (tx0 == null || z <= 1 || e.touches.length) return;
+    const dx = e.changedTouches[0].clientX - tx0; tx0 = null;
+    if (dx < -60 && bordeD) irHoja(+1); else if (dx > 60 && bordeI) irHoja(-1);
+  });
+  const irHoja = d => {
+    const fig = box.closest("figure"), dest = d > 0 ? fig.nextElementSibling : fig.previousElementSibling;
+    zoom(1); if (!dest) return;
+    prev.scrollTo({ left: dest.offsetLeft - (prev.clientWidth - dest.clientWidth) / 2, behavior: "smooth" });
+  };
+  box._reset = () => { if (z > 1) zoom(1); };
+}
+let VISOR = null;
+function cerrarVisor(){ if (VISOR){ VISOR.remove(); VISOR = null; } }
 
 async function renderPageImage(P, scale){
   const vp = P.page.getViewport({scale});
@@ -839,20 +1217,71 @@ async function fotoCanvas(key){
   ctx.drawImage(im, 0, head, W, ih);
   return c;
 }
+/* hoja de hallazgo para una foto marcada con defecto (con su observación) */
+async function hallazgoFotoCanvas(row, id, n){
+  const b = await fotoBlob(id); const im = b ? await loadImg(URL.createObjectURL(b)) : null; if (!im) return null;
+  const obs = infoFoto(id).obs || (S.checks[row.key] || {}).detalle || "";
+  const W = 1200, pad = 36, ih = Math.round(im.naturalHeight * W / im.naturalWidth);
+  const c = document.createElement("canvas"), ctx = c.getContext("2d");
+  ctx.font = "30px Arial"; const lines = wrap(ctx, obs, W - pad*2).slice(0, 6);
+  const head = 70 + lines.length * 38 + 24; c.width = W; c.height = head + ih;
+  ctx.fillStyle = "#0D2C4F"; ctx.fillRect(0, 0, W, head);
+  ctx.fillStyle = "#fff"; ctx.font = "bold 34px Arial"; ctx.textBaseline = "top";
+  ctx.fillText(`OT ${S.ot || "—"} · Hallazgo ítem ${row.r.item}${n ? " · foto " + n : ""}`, pad, 26);
+  ctx.font = "30px Arial"; ctx.fillStyle = "#DCE6F2"; lines.forEach((l, i) => ctx.fillText(l, pad, 76 + i * 38));
+  ctx.drawImage(im, 0, head, W, ih);
+  return c;
+}
+/* hoja "Registro fotográfico": 4 fotos por hoja con ítem y componente */
+async function hojasFotosAct(keysG){
+  const lista = [];
+  for (const row of allRows()){ if (!keysG.has(row.key)) continue; const ids = fotosDe(row.key);
+    const norm = ids.filter(id => !infoFoto(id).def);
+    norm.forEach((id, i) => lista.push({ id, txt: `Ítem ${row.r.item}${row.r.comp ? " · " + row.r.comp : ""}${norm.length > 1 ? " · foto " + (i+1) : ""}` })); }
+  const hojas = [], W = 1240, pad = 36, head = 120, cw = (W - pad*3) / 2, ch = 640, capH = 64;
+  for (let h = 0; h < lista.length; h += 4){
+    const grupo = lista.slice(h, h + 4), filas = Math.ceil(grupo.length / 2);
+    const c = document.createElement("canvas"); c.width = W; c.height = head + pad + filas * (ch + capH + pad);
+    const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, c.height);
+    ctx.fillStyle = "#0D2C4F"; ctx.fillRect(0, 0, W, head); ctx.textBaseline = "top";
+    ctx.fillStyle = "#fff"; ctx.font = "bold 36px Arial"; ctx.fillText(`OT ${S.ot || "—"} · Registro fotográfico`, pad, 22);
+    ctx.font = "26px Arial"; ctx.fillStyle = "#DCE6F2";
+    const sub = [GRUPOS.length > 1 ? nombreGrupo(ACTIVO) : (META.desc || META.equipo || ""), hoyTxt(), lista.length > 4 ? `hoja ${h/4 + 1} de ${Math.ceil(lista.length/4)}` : ""].filter(Boolean).join(" · ");
+    ctx.fillText(sub.slice(0, 80), pad, 72);
+    for (let i = 0; i < grupo.length; i++){
+      const x = pad + (i % 2) * (cw + pad), y = head + pad + Math.floor(i / 2) * (ch + capH + pad);
+      ctx.fillStyle = "#F3F5F4"; ctx.fillRect(x, y, cw, ch);
+      const b = await fotoBlob(grupo[i].id); const im = b ? await loadImg(URL.createObjectURL(b)) : null;
+      if (im){ const k = Math.min(cw / im.naturalWidth, ch / im.naturalHeight), w = im.naturalWidth * k, hh = im.naturalHeight * k; ctx.drawImage(im, x + (cw - w)/2, y + (ch - hh)/2, w, hh); }
+      ctx.fillStyle = "#1E1E1E"; ctx.font = "26px Arial";
+      const ln = wrap(ctx, grupo[i].txt, cw).slice(0, 2); ln.forEach((l, j) => ctx.fillText(l, x, y + ch + 8 + j * 30));
+    }
+    hojas.push(c);
+  }
+  return hojas;
+}
 const toBlob = (c, q=0.88) => new Promise(r => c.toBlob(r, "image/jpeg", q));
 async function generarImagenes(){
   fijarEstiloOt();
   const sel = PAGES.filter(P => P.isPauta), canv = [];
   for (const P of sel){ canv.push(await renderPageImage(P, 2.6)); await ceder(); }
   const G = GRUPOS.length > 1 ? "_" + sinTilde(nombreGrupo(ACTIVO).replace(/^Pauta de /, "")).replace(/[^\w.-]+/g, "_").replace(/_+$/, "").slice(0, 40) : "";
-  const base = `Pauta_OT${S.ot||""}${G}`, outs = [], keysG = new Set(allRows().map(r => r.key));
-  for (let i=0;i<canv.length;i++) outs.push({ canvas:canv[i], blob: await toBlob(canv[i]), name: `${base}_hoja${i+1}.jpg`, cap: `Hoja ${i+1} de ${canv.length}` });
+  const base = baseArchivo(), outs = [], keysG = new Set(allRows().map(r => r.key));
+  for (let i=0;i<canv.length;i++) outs.push({ canvas:canv[i], blob: await toBlob(canv[i]), name: `${base} - hoja ${i+1}.jpg`, cap: `Hoja ${i+1} de ${canv.length}` });
   for (const key of Object.keys(S.fotos)){
     if ((S.checks[key]||{}).estado !== "CD" || !keysG.has(key)) continue;
     const c = await fotoCanvas(key); if (!c) continue;
     const it = key.split("-")[1];
-    outs.push({ canvas:c, blob: await toBlob(c, 0.85), name: `${base}_hallazgo_item${it}.jpg`, cap: `Foto hallazgo ítem ${it}`, foto:true });
+    outs.push({ canvas:c, blob: await toBlob(c, 0.85), name: `${base} - hallazgo item ${it}.jpg`, cap: `Foto hallazgo ítem ${it}`, foto:true });
   }
+  for (const row of allRows()){ if (!keysG.has(row.key)) continue;
+    const defs = fotosDef(row.key);
+    for (let i = 0; i < defs.length; i++){
+      const c = await hallazgoFotoCanvas(row, defs[i], defs.length > 1 ? i + 1 : 0); if (!c) continue;
+      outs.push({ canvas:c, blob: await toBlob(c, 0.85), name: `${base} - hallazgo item ${row.r.item}${defs.length > 1 ? " foto " + (i+1) : ""}.jpg`, cap: `Hallazgo ítem ${row.r.item}`, foto:true });
+    }
+  }
+  for (const c of await hojasFotosAct(keysG)) outs.push({ canvas:c, blob: await toBlob(c, 0.85), name: `${base} - fotos ${outs.filter(o => o.reg).length + 1}.jpg`, cap: "Registro fotográfico", foto:true, reg:true });
   outs.forEach(o => o.url = URL.createObjectURL(o.blob));
   return outs;
 }
@@ -861,38 +1290,62 @@ function marcarEnviada(){
   else { META.estado = "enviada"; }
   META.enviada = Date.now(); persist();
 }
+/* texto que acompaña al envío: "OT 5755828 MANT 28D INST SLEEWING…" (permite encontrarla con el buscador de WhatsApp) */
+function textoEnvio(){
+  const nombre = (GRUPOS.length > 1 && ACTIVO != null ? nombreGrupo(ACTIVO) : (META.equipo || META.desc || "")).trim();
+  return [`OT ${S.ot || "sin número"}`, nombre].filter(Boolean).join(" ");
+}
+/* qué se envía: imágenes, PDF o ambos (al menos uno). Se recuerda en el perfil. */
+function selEnvio(){
+  let s0 = perfil.envioSel;
+  if (!s0 || typeof s0 !== "object") s0 = perfil.envio === "pdf" ? { img: false, pdf: true } : { img: true, pdf: false };
+  if (!s0.img && !s0.pdf) s0 = { img: true, pdf: false };
+  return s0;
+}
+/* nombre de los archivos: "OT 555886 MANT 28D INST SLEEWING" (con espacios, para que el buscador de WhatsApp encuentre el número) */
+function baseArchivo(){
+  return textoEnvio().replace(/[\\/:*?"<>|#%&{}$!'@+`=]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 90).trim() || "OT";
+}
 async function compartir(modo){
-  busy(true, "Preparando…");
+  const sel = selEnvio();
+  busy(true, sel.pdf ? "Creando PDF…" : "Preparando…");
   try {
+    const items = (sel.img ? OUTS.map(o => ({ blob: o.blob, name: o.name, mime: "image/jpeg" })) : [])
+      .concat(sel.pdf ? [Object.assign(await crearPdf(), { mime: "application/pdf" })] : []);
     if (NATIVO){
       const arr = [];
-      for (const o of OUTS) arr.push({ name: o.name, b64: await blobToB64(o.blob), mime: "image/jpeg" });
-      Android.compartir(JSON.stringify(arr), modo);
+      for (const o of items) arr.push({ name: o.name, b64: await blobToB64(o.blob), mime: o.mime });
+      Android.compartirTexto(JSON.stringify(arr), modo, textoEnvio());
       marcarEnviada();
-    } else if (navigator.canShare && navigator.canShare({ files: OUTS.map(o => new File([o.blob], o.name, {type:"image/jpeg"})) })){
-      await navigator.share({ files: OUTS.map(o => new File([o.blob], o.name, {type:"image/jpeg"})) }); marcarEnviada();
-    } else { OUTS.forEach(o => descargar(o.blob, o.name)); marcarEnviada(); }
+    } else {
+      const files = items.map(o => new File([o.blob], o.name, { type: o.mime }));
+      if (navigator.canShare && navigator.canShare({ files })){ await navigator.share({ files, text: textoEnvio() }); marcarEnviada(); }
+      else { items.forEach(o => descargar(o.blob, o.name)); marcarEnviada(); }
+    }
   } catch(e){ if (e && e.name !== "AbortError") toast("No se pudo compartir"); }
   busy(false);
 }
 window.onCompartido = function(ok){ if (ok === false) toast("No se encontró WhatsApp; elige otra app"); };
 function descargar(blob, name){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
-async function guardarPdf(){
+async function crearPdf(){
   fijarEstiloOt();
+  if (!window.jspdf) await new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "lib/jspdf.umd.min.js"; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+  const { jsPDF } = window.jspdf; let doc = null;
+  for (const P of PAGES.filter(P => P.isPauta)){
+    const c = await renderPageImage(P, 2.4);
+    if (!doc) doc = new jsPDF({ unit:"pt", format:[P.w,P.h], orientation: P.w > P.h ? "l" : "p" }); else doc.addPage([P.w,P.h], P.w > P.h ? "l" : "p");
+    doc.addImage(c.toDataURL("image/jpeg", 0.88), "JPEG", 0, 0, P.w, P.h); await ceder();
+  }
+  for (const o of OUTS.filter(o => o.foto)){
+    const w = 612, h = Math.round(o.canvas.height * 612 / o.canvas.width);
+    doc.addPage([w, h], h > w ? "p" : "l"); doc.addImage(o.canvas.toDataURL("image/jpeg", 0.85), "JPEG", 0, 0, w, h);
+  }
+  return { blob: doc.output("blob"), name: baseArchivo() + ".pdf" };
+}
+async function guardarPdf(){
   busy(true, "Creando PDF…");
   try {
-    if (!window.jspdf) await new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "lib/jspdf.umd.min.js"; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
-    const { jsPDF } = window.jspdf; let doc = null;
-    for (const P of PAGES.filter(P => P.isPauta)){
-      const c = await renderPageImage(P, 2.4);
-      if (!doc) doc = new jsPDF({ unit:"pt", format:[P.w,P.h], orientation: P.w > P.h ? "l" : "p" }); else doc.addPage([P.w,P.h], P.w > P.h ? "l" : "p");
-      doc.addImage(c.toDataURL("image/jpeg", 0.88), "JPEG", 0, 0, P.w, P.h); await ceder();
-    }
-    for (const o of OUTS.filter(o => o.foto)){
-      const w = 612, h = Math.round(o.canvas.height * 612 / o.canvas.width);
-      doc.addPage([w, h], h > w ? "p" : "l"); doc.addImage(o.canvas.toDataURL("image/jpeg", 0.85), "JPEG", 0, 0, w, h);
-    }
-    const blob = doc.output("blob"), name = `Pauta_OT${S.ot||""}.pdf`;
+    const { blob, name } = await crearPdf();
     if (NATIVO) Android.guardar(name, await blobToB64(blob), "application/pdf"); else descargar(blob, name);
   } catch(e){ console.error(e); toast("No se pudo crear el PDF"); }
   busy(false);
@@ -1029,6 +1482,13 @@ function renderSettings(){
 /* ================= NOVEDADES POR VERSIÓN ================= */
 /* La primera entrada es la versión actual: se muestra una vez al abrir la app tras actualizar. */
 const NOVEDADES = [
+  { v: "Ver. 1.32", fecha: "26-11-2026", items: [
+    "Fotos en cualquier actividad: tómalas o elígelas de la galería, y marca cada una como normal o con defecto, con su observación.",
+    "Editor de fotos: marca con lápiz, círculo o flecha, y recorta la imagen.",
+    "Envío mejorado: elige fotos, PDF o ambos. Los archivos llevan el N° de OT para encontrarlos en WhatsApp.",
+    "Zoom en la vista previa: acerca las hojas con los dedos antes de enviar.",
+    "Biblioteca: abre pautas desde una carpeta del celular o desde archivos ZIP.",
+    "Términos de uso actualizados: se piden de nuevo al abrir." ] },
   { v: "Ver. 1.31", fecha: "22-11-2026", items: [
     "Se crea \"Biblioteca de pautas\": agrega el enlace de una carpeta de Google Drive y llena pautas sin necesidad de una OT. En Android también puedes usar una carpeta del teléfono.",
     "Ver antes de llenar: revisa la pauta antes de elegirla.",
@@ -1174,6 +1634,8 @@ function textoTerminos(){
       Es una iniciativa personal del creador. No es un sistema oficial de la empresa ni reemplaza a SAP ni a los procedimientos vigentes.</div></div>
     ${sec("1. Propósito", [
       "Automatizar el llenado de las pautas de mantenimiento de las OT: marcar, anotar observaciones, firmar y enviar por WhatsApp.",
+      "Funciona como un editor de PDF selectivo: lee el documento que tú abres, reconoce las tablas de la pauta y escribe sobre ellas solo las marcas, textos y firma que tú indicas. El resto del documento no se modifica.",
+      "La aplicación no trae pautas, OT ni documentos propios: trabaja únicamente con los archivos que el usuario abre o carga en su teléfono.",
       "Uso gratuito y sin fines de lucro. Sin publicidad.",
       "Versión de prueba: puede tener errores o cambiar.",
       "Cada actualización muestra sus novedades al abrir la app. Si cambian estos términos, se vuelven a pedir.",
@@ -1183,20 +1645,30 @@ function textoTerminos(){
       "No tiene base de datos de usuarios, no pide cuenta ni contraseña y no usa seguimiento ni estadísticas.",
       "Tu nombre, tu firma y el avance de cada OT se guardan solo en este teléfono. El creador no tiene acceso a ellos.",
       "Las imágenes y PDF solo salen del teléfono cuando tú decides compartirlos.",
+      "Las fotos que agregas a una OT se guardan solo dentro de la aplicación y se borran al borrar esa OT de la bandeja.",
+      "Al enviar, el nombre de los archivos y el texto que los acompaña incluyen el N° de OT y el nombre de la pauta, para encontrarlos en WhatsApp.",
       "Al desinstalar la aplicación se borra todo lo guardado."])}
     ${sec("3. Permisos", [
-      "Archivos: abrir el PDF de la OT y guardar el resultado.",
-      "Cámara: fotos de hallazgos.",
+      "Archivos: abrir el PDF de la OT, cargar pautas desde una carpeta o un archivo ZIP y guardar el resultado.",
+      "Cámara: fotos de hallazgos y de las actividades.",
+      "Galería: elegir fotos ya guardadas en el teléfono para adjuntarlas a una actividad o a un hallazgo.",
       "Micrófono: dictar observaciones con el servicio de voz del teléfono (Google).",
       "Compartir: enviar por WhatsApp u otra aplicación. Esos servicios tienen sus propias políticas.",
-      "Internet: solo para revisar si hay una versión nueva en la página de la app. No se envía ningún dato."])}
+      "Internet: solo para revisar si hay una versión nueva de la aplicación. No se envía ningún dato personal."])}
     ${sec("4. Responsabilidades", [
       "Revisa que la pauta esté correcta antes de enviarla. La aplicación ayuda a marcar, pero no valida el trabajo.",
       "Las OT y pautas son documentos internos: compártelas solo por los canales autorizados.",
       "No reemplaza procedimientos de seguridad, permisos de trabajo ni instrucciones de la supervisión.",
+      "Las fotos deben mostrar solo lo necesario para el trabajo. Evita captar personas o información ajena a la mantención.",
       "No distribuyas la aplicación fuera del grupo de prueba sin autorización del creador.",
       "Informa los errores al creador indicando el número de OT.",
-      "Se entrega tal como está, sin garantía. Puedes dejar de usarla desinstalándola."])}`;
+      "Se entrega tal como está, sin garantía. Puedes dejar de usarla desinstalándola."])}
+    ${sec("5. Biblioteca de pautas y manejo de la información", [
+      "La biblioteca muestra las pautas de una carpeta del teléfono o guarda en el teléfono las de un archivo ZIP que tú cargas. La aplicación no las envía a ningún servidor ni al creador.",
+      "Las carpetas de pautas las comparte el responsable de cada grupo de trabajo, solo con las personas autorizadas y bajo los criterios de seguridad del grupo.",
+      "Quien descarga y carga las pautas es responsable de su resguardo y de no divulgarlas fuera del grupo de trabajo ni de los canales autorizados.",
+      "El tratamiento de la información contenida en las pautas y OT, incluida la información sensible o confidencial, es responsabilidad de cada usuario. El creador no tiene acceso a ella ni responde por su uso indebido.",
+      "Al quitar una biblioteca o desinstalar la aplicación, se borran las copias de las pautas guardadas dentro de la aplicación. Los archivos originales del teléfono (la carpeta o el ZIP) no se tocan."])}`;
 }
 function renderTerminos(soloVer){
   show("scr-terms");
@@ -1230,6 +1702,6 @@ function renderTerminos(soloVer){
 
 /* ================= INICIO ================= */
 (async () => { if (!NATIVO){ await IDB.cargar(); } if (terminosOk()){ goHome(); revisarNovedades(); setTimeout(() => buscarActualizacion(false), 1500); } else renderTerminos(false); })();
-if (NATIVO){ try { const pend = JSON.parse(Android.paginaLista() || "[]"); if (pend.length) window.onOtRecibida(pend); } catch(e){} }
+if (NATIVO){ try { const pend = JSON.parse(Android.paginaLista() || "[]"); if (pend.length) window.onOtRecibida(pend); } catch(e){} setTimeout(() => { try { window.onZipRecibido(); } catch(e){} }, 900); }
 window.__app = { get S(){return S;}, get PAGES(){return PAGES;}, get OUTS(){return OUTS;}, openOt, memFiles, changed };
 window.renderPageImageT = renderPageImage;

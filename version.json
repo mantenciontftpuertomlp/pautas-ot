@@ -1,11 +1,12 @@
 {
- "version": "1.31",
- "apk": "apk/PautasOT_Ver1.31.apk",
+ "version": "1.32",
+ "apk": "apk/PautasOT_Ver1.32.apk",
  "notas": [
-  "Se crea \"Biblioteca de pautas\": agrega el enlace de una carpeta de Google Drive y llena pautas sin necesidad de una OT. En Android también puedes usar una carpeta del teléfono.",
-  "Ver antes de llenar: revisa la pauta antes de elegirla.",
-  "N° de OT: las pautas que no vienen de una OT piden el número para que salga en la hoja.",
-  "OT con varias pautas: la app las reconoce (inspección, mantención o por equipo) y eliges cuál llenar con un botón.",
-  "Cierre del formato nuevo: equipos, materiales, aviso subsecuente, fecha y responsable."
+  "Fotos en cualquier actividad: tómalas o elígelas de la galería, y marca cada una como normal o con defecto, con su observación.",
+  "Editor de fotos: marca con lápiz, círculo o flecha, y recorta la imagen.",
+  "Envío mejorado: elige fotos, PDF o ambos. Los archivos llevan el N° de OT para encontrarlos en WhatsApp.",
+  "Zoom en la vista previa: acerca las hojas con los dedos antes de enviar.",
+  "Biblioteca: abre pautas desde una carpeta del celular o desde archivos ZIP.",
+  "Términos de uso actualizados: se piden de nuevo al abrir."
  ]
 }
