@@ -1,12 +1,12 @@
 {
- "version": "1.32",
- "apk": "apk/PautasOT_Ver1.32.apk",
+ "version": "1.33",
+ "apk": "apk/PautasOT_Ver1.33.apk",
  "notas": [
-  "Fotos en cualquier actividad: tómalas o elígelas de la galería, y marca cada una como normal o con defecto, con su observación.",
-  "Editor de fotos: marca con lápiz, círculo o flecha, y recorta la imagen.",
-  "Envío mejorado: elige fotos, PDF o ambos. Los archivos llevan el N° de OT para encontrarlos en WhatsApp.",
-  "Zoom en la vista previa: acerca las hojas con los dedos antes de enviar.",
-  "Biblioteca: abre pautas desde una carpeta del celular o desde archivos ZIP.",
+  "Nuevo nombre: la app ahora se llama Pauta Digital.",
+  "Check list básico: se agrega visualización de llenado de check list básico (Sin defecto / Con defecto / N/A, observación en su columna, y \"Realizado por\" con tu nombre y firma).",
+  "Datos del formulario: completa Turno, Fecha, Hora, Nombre M/V y supervisores. La fecha y la hora se ponen solas.",
+  "Separación por equipo: las actividades del check list se agrupan por TAG, con su contador de avance.",
+  "Biblioteca: ahora se llama solo \"Biblioteca\" y guarda pautas, check list y formularios.",
   "Términos de uso actualizados: se piden de nuevo al abrir."
  ]
 }

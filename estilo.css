@@ -285,3 +285,10 @@ label.acepto input{width:22px;height:22px;accent-color:var(--pri);flex:none}
 .etq{display:flex;flex-direction:column;gap:8px}
 .etq .seg button.def.on{background:#C2410C;border-color:#C2410C;color:#fff}
 .etq textarea{min-height:64px}
+
+.grp{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 2px 8px;padding:10px 14px;border-radius:12px;background:var(--pri-dk,#0B5566);color:#fff}
+.grp>div{display:flex;flex-direction:column;min-width:0}
+.grp .gt{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
+.grp b{font-size:17px;overflow-wrap:anywhere}
+.grp .gc{font-size:13px;font-weight:700;background:rgba(255,255,255,.18);padding:3px 9px;border-radius:10px;flex-shrink:0}
+.grp .gc.ok{background:#2E9E6A}

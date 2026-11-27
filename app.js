@@ -1,8 +1,8 @@
 "use strict";
-/* Pautas OT — interfaz de la app (Ver. 1.25) */
-const VERSION_APP = "Ver. 1.32";
+/* Pauta Digital — interfaz de la app (Ver. 1.25) */
+const VERSION_APP = "Ver. 1.33";
 const URL_SITIO = "https://mantenciontftpuertomlp.github.io/pautas-ot/";
-const TERMINOS_VER = 3; // 2: internet para buscar actualizaciones (Ver. 1.30) · 3: biblioteca de pautas y manejo de la información
+const TERMINOS_VER = 4; // 4: Pauta Digital, check list y formularios (Ver. 1.33) · 2: internet para buscar actualizaciones (Ver. 1.30) · 3: biblioteca de pautas y manejo de la información
 
 /* ---------- utilidades ---------- */
 const $ = (s, r=document) => r.querySelector(s);
@@ -150,7 +150,7 @@ function renderHome(){
   metas.forEach(({m}) => { cnt[(m && m.estado) || "pendiente"]++; });
   $("#stPend").textContent = cnt.pendiente; $("#stCurso").textContent = cnt.curso; $("#stEnv").textContent = cnt.enviada;
   if (!files.length){
-    $("#homeList").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg><div><b>Aún no hay OTs</b></div><div style="font-size:14px;margin-top:6px">Abre el PDF de una OT o compártelo desde WhatsApp a <b>Pautas OT</b>.</div></div>`;
+    $("#homeList").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg><div><b>Aún no hay OTs</b></div><div style="font-size:14px;margin-top:6px">Abre el PDF de una OT o compártelo desde WhatsApp a <b>Pauta Digital</b>.</div></div>`;
     return;
   }
   const card = ({f, m}) => {
@@ -294,7 +294,7 @@ function renderBib(){
   const fs = BIB.fuentes, q = BIB.q.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   if (!fs.length){
     $("#bibBody").innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-2z"/><path d="M10 3h4v18h-4zM14 4l4-1 3 17-4 1z"/></svg>
-      <div><b>Aún no hay bibliotecas</b></div><div style="font-size:14px;margin-top:6px">${NATIVO ? "Agrega una carpeta del teléfono o un archivo ZIP" : "Agrega un archivo ZIP"} con las pautas de trabajo en PDF (por ejemplo, la carpeta descargada desde Drive).</div></div>`;
+      <div><b>Aún no hay bibliotecas</b></div><div style="font-size:14px;margin-top:6px">${NATIVO ? "Agrega una carpeta del teléfono o un archivo ZIP" : "Agrega un archivo ZIP"} con pautas o check list en PDF (por ejemplo, la carpeta descargada desde Drive).</div></div>`;
     return;
   }
   const norm = t => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -432,7 +432,7 @@ function menuZip(f){
   $("#zRep").onclick = () => { closeSheet(); elegirZip({ id: f.id, reemplazar: true }); };
   $("#zAdd").onclick = () => { closeSheet(); elegirZip({ id: f.id, reemplazar: false }); };
 }
-/* ZIP recibido con "Abrir con / Compartir → Pautas OT" */
+/* ZIP recibido con "Abrir con / Compartir → Pauta Digital" */
 window.onZipRecibido = function(){
   if (!NATIVO) return; let l = []; try { l = JSON.parse(Android.zipsPendientes() || "[]"); } catch(e){}
   if (!l.length) return;
@@ -477,10 +477,10 @@ async function openOt(name){
     const text = words.map(x=>x.t).join(" ");
     const esSAP = /ORDEN\s+DE\s+MANTENIMIENTO/i.test(text) || /Orden\s*:\s*\d{5,}/.test(text);
     if (esSAP) haySAP = true;
-    const isPauta = !esSAP && (/Indicar\s+Nro/i.test(text) || /PAUTA\s+DE\s+MANTENIMIENTO/i.test(text) || /ALCANCE\s+GENERAL|EJECUCI[OÓ]N\s+(INSPECCI|MANTENIMIENTO)|Descripci[oó]n\s+Actividades|OBSERVACIONES|CONTROL\s+DE\s+REVISIONES|Nombre\s+y\s+Apellido/i.test(text));
+    const isPauta = !esSAP && (/CHECK\s*-?\s*LIST/i.test(text) || !!headerSinCon(words, w) || !!headerOk(words, w) || /Indicar\s+Nro/i.test(text) || /PAUTA\s+DE\s+MANTENIMIENTO/i.test(text) || /ALCANCE\s+GENERAL|EJECUCI[OÓ]N\s+(INSPECCI|MANTENIMIENTO)|Descripci[oó]n\s+Actividades|OBSERVACIONES|CONTROL\s+DE\s+REVISIONES|Nombre\s+y\s+Apellido/i.test(text));
     const P = { n, w, h, isPauta, page };
     if (esSAP) operacionesOT(words).forEach(o => { if (!OPS.some(x => x.op === o.op)) OPS.push(o); });
-    if (isPauta){ const hl = await extractHLines(page); P.otBox = detectOtBox(words); const prevP = PAGES[PAGES.length-1]; P.checklist = detectChecklist(words, w, h, hl, prevP && prevP.isPauta && prevP.checklist ? prevP.checklist : null); P.epp = detectEPP(words, w, hl); P.obs = detectObs(words, w, hl); P.resp = detectResp(words, w);
+    if (isPauta){ const hl = await extractHLines(page); P.otBox = detectOtBox(words); const prevP = PAGES[PAGES.length-1]; P.checklist = detectChecklist(words, w, h, hl, prevP && prevP.isPauta && prevP.checklist ? prevP.checklist : null); P.epp = detectEPP(words, w, hl); P.obs = detectObs(words, w, hl); P.resp = detectResp(words, w) || detectRealizado(words, w); P.datos = detectCampos(words, w, hl).filter(d => !(P.checklist && P.checklist.rows.length && d.y > P.checklist.rows[0].top - 2 && d.y < P.checklist.rows[P.checklist.rows.length-1].bottom + 2));
       const excl = [];
       if (P.checklist) excl.push({ top: P.checklist.top, bottom: P.checklist.bottom });
       if (P.epp){ const ys = P.epp.rows.map(r=>r.y); excl.push({ top: Math.min(...ys) - 14, bottom: Math.max(...ys) + 6 }); }
@@ -604,6 +604,7 @@ function activarGrupo(g){
   if (!S.fin[g]){ const pc = PAGES_ALL.find(p => p.grupo === g && p.campos), c = (pc && pc.campos) || {};
     S.fin[g] = { eq: { area: c.area || "", desc: c.equipo || META.equipo || "", tag: c.tag || "" }, mat: [], rev: { fecha: "", preparo: "" } }; }
   STEPS = [];
+  if (allDatos().length) STEPS.push({k:"datos", l:"Datos"});
   if (allEpp().length || allBoxes().length) STEPS.push({k:"epp", l: allBoxes().length ? "Inicio" : "EPP"});
   if (allRows().length) STEPS.push({k:"act", l:"Actividades"});
   if (PAGES.some(p=>p.resp)) STEPS.push({k:"firma", l:"Firma"});
@@ -643,13 +644,13 @@ function obsEntries(){
 }
 const cap = s => s ? s.charAt(0) + s.slice(1).toLowerCase() : "";
 const corto = (v, n=70) => v.length > n ? v.slice(0, n-1).replace(/\s+\S*$/, "") + "…" : v;
-const extraHtml = (r, omitir) => { const ex = (r.extra || []).filter(e => !(omitir && omitir(e))); return ex.length ? `<span class="x">${ex.map(e => `<b>${esc(e.t)}:</b> ${esc(corto(e.v))}`).join(" · ")}</span>` : ""; };
+const extraHtml = (r, omitir) => { const ex = (r.extra || []).filter(e => !(omitir && omitir(e)) && !/^[Xx✓\s]*$/.test(e.v || "")); return ex.length ? `<span class="x">${ex.map(e => `<b>${esc(e.t)}:</b> ${esc(corto(e.v))}`).join(" · ")}</span>` : ""; };
 
 /* ================= PASOS ================= */
 function renderStep(scrollTop=true){
   $("#stepper").innerHTML = STEPS.map((s,i) => `<div class="${i<=step?"on":""} ${i===step?"cur":""}"><i></i><span>${s.l}</span></div>`).join("");
   const k = STEPS[step].k, body = $("#stepBody"), y = body.scrollTop;
-  if (k === "epp") renderEpp(); else if (k === "act") renderAct(); else if (k === "firma") renderFirma(); else renderEnviar(scrollTop);
+  if (k === "datos") renderDatos(); else if (k === "epp") renderEpp(); else if (k === "act") renderAct(); else if (k === "firma") renderFirma(); else renderEnviar(scrollTop);
   if (scrollTop) body.scrollTop = 0; else body.scrollTop = y;
 }
 function footNext(label, fn, extra=""){
@@ -827,6 +828,20 @@ async function editarFoto(src, onSave, onCancel, nueva, etiqueta){
   };
 }
 
+/* --- Datos del formulario (campos "Etiqueta: ____") --- */
+function allDatos(){ const vis = new Set(), out = []; PAGES.forEach(P => (P.datos || []).forEach(d => { if (!vis.has(d.key)){ vis.add(d.key); out.push(d); } })); return out; }
+function renderDatos(){
+  S.datos = S.datos || {};
+  const ahora = new Date(), hh = String(ahora.getHours()).padStart(2,"0") + ":" + String(ahora.getMinutes()).padStart(2,"0");
+  allDatos().forEach(d => { if (S.datos[d.key] == null){ if (/^fecha$/.test(d.key)) S.datos[d.key] = hoyTxt(); else if (/^hora$/.test(d.key)) S.datos[d.key] = hh; } });
+  $("#stepBody").innerHTML = `<div class="sec-t">Datos del formulario</div>
+    <div class="m" style="margin:-4px 0 10px">Lo que quede vacío sale en blanco en la hoja.</div>
+    ${allDatos().map(d => `<label class="f" for="dt_${esc(d.key)}">${esc(d.label)}</label><input type="text" id="dt_${esc(d.key)}" data-dato="${esc(d.key)}" value="${esc(S.datos[d.key] || "")}">`).join("")}`;
+  $$("[data-dato]").forEach(i => i.oninput = () => { S.datos[i.dataset.dato] = i.value; changed(true, false); });
+  footNext("Siguiente", () => nextStep());
+  changed(true, false);
+}
+
 /* --- Status y duración --- */
 const STATUS_OPC = ["Revisado", "OK", "En funcionamiento", "No aplica", "Detenido", "En falla", "Fuera de servicio"];
 const allSD = () => PAGES.flatMap(P => P.sd || []);
@@ -900,7 +915,16 @@ function renderAct(){
   if (rows.length > 1 && rows[0].r.extra) for (const e of rows[0].r.extra){
     if (rows.every(({r}) => r.extra && r.extra.some(x => x.t === e.t && x.v === e.v))) comunes.push(e);
   }
-  const esComun = e => comunes.some(c => c.t === e.t && c.v === e.v);
+  const agrupado = new Set(rows.map(({r}) => r.grupo || "")).size > 1;
+  const esComun = e => comunes.some(c => c.t === e.t && c.v === e.v) || (agrupado && e.t === "TAG");
+  const nGrupos = agrupado ? rows.filter(({r}, i) => i === 0 || r.grupo !== rows[i-1].r.grupo).length : 0;
+  let gIdx = 0;
+  const sep = (x, i) => {
+    if (!agrupado || (i > 0 && x.r.grupo === rows[i-1].r.grupo)) return "";
+    gIdx++; const del = rows.filter(y => y.r.grupo === x.r.grupo);
+    const hechos = del.filter(y => (S.checks[y.key]||{}).estado).length;
+    return `<div class="grp"><div><span class="gt">${esc(x.r.tag ? "TAG" : "Equipo")}</span><b>${esc(x.r.grupo || "Sin TAG")}</b></div><span class="gc ${hechos === del.length ? "ok" : ""}">${hechos}/${del.length}</span></div>`;
+  };
   const card = ({p, r, key}) => {
     const c = S.checks[key] || {}, sc = subCols(p);
     const b = (g,k,l) => `<button class="${btnCls(k)} ${c[g]===k?"on":""}" data-row="${key}" data-g="${g}" data-k="${k}">${esc(l)}</button>`;
@@ -911,7 +935,7 @@ function renderAct(){
     const foObs = c.estado === "CD" ? fotosDef(key).map(id => infoFoto(id).obs).filter(Boolean) : [];
     const det = c.estado === "CD" ? `<button class="detbox" data-det="${key}"><span>${c.detalle || foObs.length ? esc([c.detalle].concat(foObs).filter(Boolean).join(" · ")) : '<span class="ph">Toca para describir el defecto</span>'}</span></button>` : "";
     return `<div class="it ${cls}">
-      <div class="h"><span class="n">${esc(r.item)}</span><div style="display:flex;flex-direction:column;gap:2px"><span class="c">${esc(r.comp||"")}</span>${extraHtml(r, esComun)}<span class="d">${esc(r.desc||"")}</span></div></div>
+      <div class="h"><span class="n">${esc(agrupado ? String(r.item).replace(/^0+(?=\d)/, "") : r.item)}</span><div style="display:flex;flex-direction:column;gap:2px"><span class="c">${esc(r.comp||"")}</span>${extraHtml(r, esComun)}<span class="d">${esc(r.desc||"")}</span></div></div>
       ${r.limite ? `<span class="x"><b>Límite aceptable:</b> ${esc(r.limite)}</span>` : ""}
       ${r.medidas ? `<div class="medidas">${r.medidas.map(m => `<label class="med"><span>${esc(m.label)}</span><input type="text" inputmode="decimal" data-med="${key}#${m.id}" value="${esc((S.medidas||{})[key+"#"+m.id]||"")}" placeholder="—">${m.unidad ? `<em>${esc(m.unidad)}</em>` : ""}</label>`).join("")}</div>` : ""}
       <div class="seg" style="grid-template-columns:repeat(${est.length},minmax(0,1fr))">${est.map(e => b("estado", e.k, e.label)).join("")}</div>
@@ -928,7 +952,7 @@ function renderAct(){
     ${allInterv().map(({key}, i, arr) => `<div class="card"><b style="font-size:15px;color:var(--pri-dk)">Tipo de intervención${arr.length>1?" "+(i+1):""}</b>
       <div class="seg two" style="margin-top:8px">${[["COR","Correctiva"],["PRE","Preventiva"]].map(([k,l]) => `<button class="ok ${(S.interv||{})[key]===k?"on":""}" data-interv="${key}" data-k="${k}">${l}</button>`).join("")}</div></div>`).join("")}
     ${comunes.length ? `<div class="card comun">${comunes.map(e => `<div><b>${esc(e.t)}</b><span>${esc(e.v)}</span></div>`).join("")}<div class="m">Aplica a los ${rows.length} ítems</div></div>` : ""}
-    ${rows.map(card).join("")}
+    ${rows.map((x, i) => sep(x, i) + card(x)).join("")}
     <button class="btn dash" id="addObs" style="margin-top:4px">+ Observación adicional</button>
     ${S.obsExtra.map((o,i) => `<div class="card" style="margin-top:10px;display:flex;gap:10px;align-items:center"><b style="min-width:34px">${esc(o.item||"—")}</b><span style="flex:1">${esc(o.text)}</span><button class="btn sm" data-obs="${i}">Editar</button></div>`).join("")}`;
   const rs = $("#restoSD"); if (rs) rs.onclick = () => {
@@ -1466,7 +1490,7 @@ function renderSettings(){
     <div class="card"><b style="font-size:15px">Actualizaciones</b>
       <div style="font-size:13.5px;margin:4px 0 8px" id="updEstado">Tienes la ${VERSION_APP}.</div>
       <button class="btn outline" id="sUpd" style="width:100%">Buscar actualización</button></div>
-    <div class="ver">Pautas OT · ${VERSION_APP}</div>`;
+    <div class="ver">Pauta Digital · ${VERSION_APP}</div>`;
   $("#sUpd").onclick = () => buscarActualizacion(true);
   $("#sT").onclick = () => renderTerminos(true);
   enlazarEstilo();
@@ -1482,6 +1506,13 @@ function renderSettings(){
 /* ================= NOVEDADES POR VERSIÓN ================= */
 /* La primera entrada es la versión actual: se muestra una vez al abrir la app tras actualizar. */
 const NOVEDADES = [
+  { v: "Ver. 1.33", fecha: "27-11-2026", items: [
+    "Nuevo nombre: la app ahora se llama Pauta Digital.",
+    "Check list básico: se agrega visualización de llenado de check list básico (Sin defecto / Con defecto / N/A, observación en su columna, y \"Realizado por\" con tu nombre y firma).",
+    "Datos del formulario: completa Turno, Fecha, Hora, Nombre M/V y supervisores. La fecha y la hora se ponen solas.",
+    "Separación por equipo: las actividades del check list se agrupan por TAG, con su contador de avance.",
+    "Biblioteca: ahora se llama solo \"Biblioteca\" y guarda pautas, check list y formularios.",
+    "Términos de uso actualizados: se piden de nuevo al abrir." ] },
   { v: "Ver. 1.32", fecha: "26-11-2026", items: [
     "Fotos en cualquier actividad: tómalas o elígelas de la galería, y marca cada una como normal o con defecto, con su observación.",
     "Editor de fotos: marca con lápiz, círculo o flecha, y recorta la imagen.",
@@ -1629,13 +1660,13 @@ function hoyTxt(){ const d = new Date(), z = n => String(n).padStart(2,"0"); ret
 function textoTerminos(){
   const sec = (t, items) => `<div class="card"><b style="font-size:15px;color:var(--pri-dk)">${t}</b><ul class="terms">${items.map(i => `<li>${i}</li>`).join("")}</ul></div>`;
   return `
-    <div class="card"><div style="font-size:13.5px;line-height:1.45">Aplicación <b>Pautas OT ${VERSION_APP} (beta)</b>, ${NATIVO ? "para Android" : "versión web para iPhone"}.<br>
+    <div class="card"><div style="font-size:13.5px;line-height:1.45">Aplicación <b>Pauta Digital ${VERSION_APP} (beta)</b>, ${NATIVO ? "para Android" : "versión web para iPhone"}.<br>
       Creador y responsable: <b>${CREADOR}</b>.<br>Contacto: ${CONTACTO}.<br>
-      Es una iniciativa personal del creador. No es un sistema oficial de la empresa ni reemplaza a SAP ni a los procedimientos vigentes.</div></div>
+      Es una iniciativa personal del creador. No es un sistema oficial de ninguna empresa ni reemplaza los sistemas o procedimientos vigentes.</div></div>
     ${sec("1. Propósito", [
-      "Automatizar el llenado de las pautas de mantenimiento de las OT: marcar, anotar observaciones, firmar y enviar por WhatsApp.",
-      "Funciona como un editor de PDF selectivo: lee el documento que tú abres, reconoce las tablas de la pauta y escribe sobre ellas solo las marcas, textos y firma que tú indicas. El resto del documento no se modifica.",
-      "La aplicación no trae pautas, OT ni documentos propios: trabaja únicamente con los archivos que el usuario abre o carga en su teléfono.",
+      "Automatizar el llenado de pautas, check list y otros formularios en PDF: marcar, completar datos del encabezado (turno, fecha, hora…), anotar observaciones, firmar y enviar por WhatsApp u otra aplicación.",
+      "Funciona como un editor de PDF selectivo: lee el documento que tú abres, reconoce sus tablas y campos, y escribe sobre ellos solo las marcas, textos y firma que tú indicas. El resto del documento no se modifica.",
+      "La aplicación no trae pautas, check list ni documentos propios: trabaja únicamente con los archivos que el usuario abre o carga en su teléfono.",
       "Uso gratuito y sin fines de lucro. Sin publicidad.",
       "Versión de prueba: puede tener errores o cambiar.",
       "Cada actualización muestra sus novedades al abrir la app. Si cambian estos términos, se vuelven a pedir.",
@@ -1643,7 +1674,8 @@ function textoTerminos(){
     ${sec("2. Datos personales", [
       "La aplicación no recopila datos personales ni los envía a servidores del creador ni de terceros.",
       "No tiene base de datos de usuarios, no pide cuenta ni contraseña y no usa seguimiento ni estadísticas.",
-      "Tu nombre, tu firma y el avance de cada OT se guardan solo en este teléfono. El creador no tiene acceso a ellos.",
+      "Tu nombre, tu firma y el avance de cada OT o check list se guardan solo en este teléfono. El creador no tiene acceso a ellos.",
+      "Los datos que escribes en un formulario (por ejemplo, nombres del turno o de la nave) se guardan solo en este teléfono, junto a ese documento.",
       "Las imágenes y PDF solo salen del teléfono cuando tú decides compartirlos.",
       "Las fotos que agregas a una OT se guardan solo dentro de la aplicación y se borran al borrar esa OT de la bandeja.",
       "Al enviar, el nombre de los archivos y el texto que los acompaña incluyen el N° de OT y el nombre de la pauta, para encontrarlos en WhatsApp.",
@@ -1656,24 +1688,26 @@ function textoTerminos(){
       "Compartir: enviar por WhatsApp u otra aplicación. Esos servicios tienen sus propias políticas.",
       "Internet: solo para revisar si hay una versión nueva de la aplicación. No se envía ningún dato personal."])}
     ${sec("4. Responsabilidades", [
-      "Revisa que la pauta esté correcta antes de enviarla. La aplicación ayuda a marcar, pero no valida el trabajo.",
+      "Revisa que la pauta o check list esté correcto antes de enviarlo. La aplicación ayuda a marcar, pero no valida el trabajo.",
+      "La aplicación puede no reconocer todos los formularios. Revisa la vista previa antes de enviar.",
+      "Si anotas nombres de otras personas (jefe de turno, supervisor), usa solo lo necesario para el formulario.",
       "Las OT y pautas son documentos internos: compártelas solo por los canales autorizados.",
       "No reemplaza procedimientos de seguridad, permisos de trabajo ni instrucciones de la supervisión.",
-      "Las fotos deben mostrar solo lo necesario para el trabajo. Evita captar personas o información ajena a la mantención.",
+      "Las fotos deben mostrar solo lo necesario para el trabajo. Evita captar personas o información ajena al trabajo.",
       "No distribuyas la aplicación fuera del grupo de prueba sin autorización del creador.",
       "Informa los errores al creador indicando el número de OT.",
       "Se entrega tal como está, sin garantía. Puedes dejar de usarla desinstalándola."])}
-    ${sec("5. Biblioteca de pautas y manejo de la información", [
-      "La biblioteca muestra las pautas de una carpeta del teléfono o guarda en el teléfono las de un archivo ZIP que tú cargas. La aplicación no las envía a ningún servidor ni al creador.",
-      "Las carpetas de pautas las comparte el responsable de cada grupo de trabajo, solo con las personas autorizadas y bajo los criterios de seguridad del grupo.",
-      "Quien descarga y carga las pautas es responsable de su resguardo y de no divulgarlas fuera del grupo de trabajo ni de los canales autorizados.",
-      "El tratamiento de la información contenida en las pautas y OT, incluida la información sensible o confidencial, es responsabilidad de cada usuario. El creador no tiene acceso a ella ni responde por su uso indebido.",
-      "Al quitar una biblioteca o desinstalar la aplicación, se borran las copias de las pautas guardadas dentro de la aplicación. Los archivos originales del teléfono (la carpeta o el ZIP) no se tocan."])}`;
+    ${sec("5. Biblioteca y manejo de la información", [
+      "La biblioteca muestra las pautas y check list de una carpeta del teléfono o guarda en el teléfono las de un archivo ZIP que tú cargas. La aplicación no las envía a ningún servidor ni al creador.",
+      "Las carpetas de pautas y check list las comparte el responsable de cada grupo de trabajo, solo con las personas autorizadas y bajo los criterios de seguridad del grupo.",
+      "Quien descarga y carga las pautas y check list es responsable de su resguardo y de no divulgarlas fuera del grupo de trabajo ni de los canales autorizados.",
+      "El tratamiento de la información contenida en las pautas, check list y OT, incluida la información sensible o confidencial, es responsabilidad de cada usuario. El creador no tiene acceso a ella ni responde por su uso indebido.",
+      "Al quitar una biblioteca o desinstalar la aplicación, se borran las copias de las pautas y check list guardadas dentro de la aplicación. Los archivos originales del teléfono (la carpeta o el ZIP) no se tocan."])}`;
 }
 function renderTerminos(soloVer){
   show("scr-terms");
   $("#verPill2").textContent = VERSION_APP.toUpperCase();
-  $("#scr-terms .sub").textContent = soloVer ? "Pautas OT" : "Bienvenido";
+  $("#scr-terms .sub").textContent = soloVer ? "Pauta Digital" : "Bienvenido";
   const ok = terminosOk();
   if (soloVer && ok){
     $("#termsBody").innerHTML = textoTerminos() + `<div class="card" style="font-size:13.5px">Aceptados por <b>${esc(perfil.terminos.nombre)}</b>${perfil.terminos.cargo ? " ("+esc(perfil.terminos.cargo)+")" : ""} el <b>${esc(perfil.terminos.fecha)}</b>, en la ${esc(perfil.terminos.app)}.</div>`;

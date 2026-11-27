@@ -73,15 +73,22 @@ function headerSinCon(words, W){
     const frases = [];
     // juntar solo palabras de un mismo título (la siguiente empieza en minúscula); "Si" y "No" van siempre separadas
     for (const w of toks){ const f = frases[frases.length-1]; if (f && w.x0 - f.x1 < 5 && /^[a-záéíóúñ(]/.test(w.t)){ f.t += " " + w.t; f.x1 = w.x1; } else frases.push({t:w.t, x0:w.x0, x1:w.x1}); }
+    const estados = [{k:"SD", label:"Sin defecto"}, {k:"CD", label:"Con defecto"}];
+    if (frases.length === 1 && /^N\/?A$/i.test(frases[0].t)){
+      cols.push({k:"NA", g:"estado", x:(frases[0].x0+frases[0].x1)/2, label:"N/A"}); estados.push({k:"NA", label:"N/A"}); frases.length = 0;
+    }
     const usados = new Set(["SD","CD"]);
     for (const f of frases){ let k = subKey(f.t); while (usados.has(k)) k += "X"; usados.add(k); cols.push({k, g:"sub", x:(f.x0+f.x1)/2, label: subLabel(f.t)}); }
     if (cols.length < 3) continue;
     bordes(cols, W);
     const hy = na.y;
-    const subs = cols.filter(c => c.g === "sub"), subMid = (subs[0].l + subs[subs.length-1].r)/2;
+    const subs = cols.filter(c => c.g === "sub"), subMid = subs.length ? (subs[0].l + subs[subs.length-1].r)/2 : 0;
     const arriba = words.filter(w => w.y < hy - 3 && w.y > hy - 22);
-    const tSub = arriba.filter(w => w.x0 < subMid + 30 && w.x1 > subMid - 30 && /^[A-Za-zÁÉÍÓÚáéíóúñ]{4,}$/.test(w.t)).sort((a,b)=>Math.abs(cx(a)-subMid)-Math.abs(cx(b)-subMid))[0];
-    return { mode: "sincon", hy, cols, estados: [{k:"SD", label:"Sin defecto"}, {k:"CD", label:"Con defecto"}],
+    const tSub = subs.length && arriba.filter(w => w.x0 < subMid + 30 && w.x1 > subMid - 30 && /^[A-Za-zÁÉÍÓÚáéíóúñ]{4,}$/.test(w.t)).sort((a,b)=>Math.abs(cx(a)-subMid)-Math.abs(cx(b)-subMid))[0];
+    // columna "Observación de Defecto" a la derecha del estado (texto del defecto en la misma fila)
+    const ultimo = cols[cols.length-1], obsW = words.find(w => /^Observaci/i.test(w.t) && w.x0 > ultimo.r - 2 && Math.abs(w.y - hy) < 14);
+    const obsCol = obsW ? { l: ultimo.r + 2, r: Math.min(W - 30, obsW.x1 + (obsW.x0 - ultimo.r) + 40) } : null;
+    return { mode: "sincon", hy, cols, estados, obsCol,
              subLabel: tSub ? subLabel(tSub.t) : "Subsecuente" };
   }
   return null;
@@ -124,12 +131,19 @@ function detectChecklist(words, W, H, lines, prev){
   }
   if (!hdr) return null;
   const hy = hdr.hy;
+  // filas que siguen de la hoja anterior ANTES del primer encabezado de esta hoja (bloque cortado entre hojas)
+  let yIni = hy, pre = false;
+  if (prev && !cont && prev.rows.length){
+    const ult = +prev.rows[prev.rows.length-1].item || 0;
+    const p0 = words.filter(w => /^\d{1,3}$/.test(w.t) && Math.abs(w.x0 - prev.geo.numX0) < 12 && w.y < hy - 12 && w.y > 8).sort((a,b)=>a.y-b.y)[0];
+    if (p0 && ult && +p0.t > 1 && +p0.t - ult >= 1 && +p0.t - ult <= 2){ yIni = p0.y - 8; pre = true; }
+  }
   const stops = words.filter(w => w.y > hy+6 && (/^Nota:?$/i.test(w.t) || /^TOTAL$/i.test(w.t) || (/^\d\.\d$/.test(w.t) && w.x0 < W*0.12))).map(w => w.y - w.fh*0.6);
   const stopY = stops.length ? Math.min(...stops) : H - 40;
   const numX = geo ? geo.numX0 : null;
-  const nums = words.filter(w => /^\d{1,3}$/.test(w.t) && w.y > hy+4 && w.y < stopY && (numX !== null ? Math.abs(w.x0 - numX) < 12 : w.x0 < W*0.13)).sort((a,b)=>a.y-b.y);
+  const nums = words.filter(w => /^\d{1,3}$/.test(w.t) && w.y > yIni+4 && w.y < stopY && (numX !== null ? Math.abs(w.x0 - numX) < 12 : w.x0 < W*0.13)).sort((a,b)=>a.y-b.y);
   if (!nums.length) return null;
-  const bodyWords = words.filter(w => w.y > hy+2.5 && w.y < stopY);
+  const bodyWords = words.filter(w => w.y > yIni+2.5 && w.y < stopY);
   if (!geo){
     const cerca = w => Math.abs(w.y - hy) < 16;
     const desc = words.find(w => /^Descripci/i.test(w.t) && cerca(w) && w.x0 > W*0.2);
@@ -186,7 +200,7 @@ function detectChecklist(words, W, H, lines, prev){
   const centrado = w => cx(w);
   const vistos = {};
   const rows = nums.map((n,i) => {
-    const top = i===0 ? hy + 6 : (nums[i-1].y + n.y)/2;
+    const top = i===0 ? yIni + 6 : (nums[i-1].y + n.y)/2;
     const bottom = i===nums.length-1 ? Math.min(stopY, n.y + (n.y - top)) : (n.y + nums[i+1].y)/2;
     vistos[n.t] = (vistos[n.t] || 0) + 1;
     return { item: n.t, key: vistos[n.t] > 1 ? n.t + "_" + vistos[n.t] : n.t, y: n.y, top, bottom, numX1: n.x1 };
@@ -212,7 +226,42 @@ function detectChecklist(words, W, H, lines, prev){
     if (lim){ const v = ordenar(bodyWords.filter(w => w.y >= r.top && w.y < r.bottom && cx(w) > lim.L && cx(w) < lim.R)); if (v) r.limite = v; }
   }
   rows.forEach((r,i) => { if (!r.comp){ let best=null, d=1e9; rows.forEach((o,j)=>{ if (o.comp && j!==i && !o._inh){ const dd=Math.abs(o.y-r.y); if(dd<d){d=dd;best=o;} } }); if (best && d < 45){ r.comp = best.comp; r._inh = true; } } });
-  return Object.assign({}, hdr, { rows, headerY: hy, top: cont ? 0 : hy - 9, bottom: stopY, hdr, geo });
+  agruparBloques(rows, words, prev, pre || cont);
+  return Object.assign({}, hdr, { rows, headerY: hy, top: (cont || pre) ? 0 : hy - 9, bottom: stopY, hdr, geo });
+}
+
+/* Bloques de un check list: cada tabla (equipo/TAG) reinicia la numeración. La celda TAG combinada
+   trae el texto en una sola fila, así que se copia a todo el bloque; si el bloque viene cortado de la hoja anterior, lo hereda. */
+function agruparBloques(rows, words, prev, sigue){
+  const tagDe = r => ((r.extra || []).find(e => e.t === "TAG") || {}).v || "";
+  const hayTag = rows.some(r => (r.extra || []).some(e => e.t === "TAG")) || (prev && prev.rows.some(r => r.tag != null));
+  if (!hayTag || !rows.length) return;
+  const heads = words.filter(w => /^[ÍIíi]tem$/.test(w.t)).map(it => ({ y: it.y,
+    titulo: words.filter(w => w.y > it.y - 18 && w.y < it.y - 7 && w.x0 > 190 && w.x1 < 460).sort((a,b)=>a.x0-b.x0).map(w => w.t).join(" ") }));
+  const ultPrev = prev && prev.rows.length ? prev.rows[prev.rows.length-1] : null;
+  const bloques = []; let cur = null;
+  rows.forEach((r, i) => {
+    const ant = rows[i-1], hEntre = ant && heads.some(h => h.y > ant.y && h.y < r.y);
+    if (!cur || +r.item <= +ant.item || hEntre){
+      const h = heads.filter(h => h.y < r.y).pop();
+      const continua = i === 0 && ultPrev && +r.item - +ultPrev.item >= 1 && +r.item - +ultPrev.item <= 2;
+      cur = { rows: [], titulo: h && !continua ? h.titulo : "", heredado: continua || (!h && i === 0 && sigue && ultPrev) };
+      if (cur.heredado) cur.titulo = ultPrev.titulo || "";
+      bloques.push(cur);
+    }
+    cur.rows.push(r);
+  });
+  for (const b of bloques){
+    const vals = [...new Set(b.rows.map(tagDe).filter(Boolean))];
+    let tag = vals.length === 1 ? vals[0] : "";
+    if (!tag && b.heredado) tag = ultPrev.tag || "";
+    const t = b.titulo, low = s => sinTilde(s).toLowerCase();
+    const grupo = !tag ? t : !t ? tag : low(t).includes(low(tag)) ? t : low(tag).includes(low(t)) ? tag : t + " · " + tag;
+    b.rows.forEach(r => {
+      if (vals.length <= 1){ r.tag = tag; if (tag){ const e = (r.extra = r.extra || []).find(e => e.t === "TAG"); if (e) e.v = tag; else r.extra.unshift({ t: "TAG", v: tag }); } }
+      r.titulo = t; r.grupo = grupo;
+    });
+  }
 }
 
 /* Celda "Intervención": Correctiva □ / Preventiva X (lo elige la persona) */
@@ -451,6 +500,65 @@ function detectResp(words, W){
   return null;
 }
 
+/* "Realizado Por: ______   Firma: ______" (check list): una sola fila de responsable */
+function detectRealizado(words, W){
+  const i = words.findIndex((w,k) => /^Realizado$/i.test(w.t) && words[k+1] && /^Por:?$/i.test(words[k+1].t));
+  if (i < 0) return null;
+  const rp = words[i], line = sameLine(words, rp.y, 3), fl = line.find(w => /^Firma:?$/i.test(w.t) && w.x0 > rp.x1);
+  const us = line.filter(w => /^_{5,}$/.test(w.t)).sort((a,b)=>a.x0-b.x0);
+  const nomU = us.find(u => u.x0 > rp.x1 && (!fl || u.x1 < fl.x0));
+  if (!nomU || !fl) return null;
+  const firU = us.find(u => u.x0 > fl.x1) || { x0: fl.x1 + 10, x1: Math.min(W - 30, fl.x1 + 180) };
+  return { rows: [{ y: rp.y - 1.5, item: "1" }], rowH: 12, nombre: { l: nomU.x0, r: nomU.x1 }, cargo: { l: 0, r: 0 }, firma: { l: firU.x0, r: firU.x1 } };
+}
+
+/* Campos "Etiqueta: ______" de cualquier formulario (Fecha, Turno, Nombre M/V, Supervisor…). Las firmas se manejan aparte. */
+function detectCampos(words, W, lines){
+  const out = [], usados = new Set(), NO = /firma|realizado|^por$/i;
+  const etiquetaIzq = (u) => {          // palabras a la izquierda en la misma línea, hasta un hueco grande u otro campo
+    const izq = words.filter(w => Math.abs(w.y - u.y) < 3 && w.x1 <= u.x0 + 1 && !/_{3,}/.test(w.t)).sort((a,b)=>b.x0-a.x0);
+    const ws = []; let x = u.x0;
+    for (const w of izq){ if (x - w.x1 > (ws.length ? 6 : 40)) break; ws.unshift(w); x = w.x0; if (/:$/.test(ws[0].t) && ws.length > 1 && /:$/.test(w.t)) break; }
+    return ws;
+  };
+  for (const u of words){
+    if (!/_{3,}/.test(u.t) || usados.has(u)) continue;
+    let label = "", x0 = u.x0;
+    const m2 = u.t.match(/^(.*?):?_{3,}$/);
+    if (m2 && m2[1] && /[A-Za-zÁÉÍÓÚáéíóúñ]/.test(m2[1])){            // "Turno:_______" en una sola palabra
+      const pref = m2[1].replace(/:$/, ""), frac = (m2[1].length + 1) / u.t.length;
+      const antes = etiquetaIzq(u).map(w => w.t).join(" ");
+      label = (antes ? antes + " " : "") + pref; x0 = u.x0 + (u.x1 - u.x0) * frac;
+    } else {
+      const ws = etiquetaIzq(u);
+      if (ws.length && /:$/.test(ws[ws.length-1].t)) label = ws.map(w => w.t).join(" ");
+    }
+    label = label.replace(/:$/, "").replace(/\s+/g, " ").trim();
+    if (!label || NO.test(label)) continue;
+    usados.add(u); out.push({ key: sinTilde(label).toLowerCase(), label, x0, x1: u.x1, y: u.y });
+  }
+  // etiqueta con ":" cuya línea está un poco más abajo (p. ej. "Nombre M/V:" con la raya debajo)
+  for (const w of words){
+    if (!/:$/.test(w.t) || /_{3,}/.test(w.t)) continue;
+    const ws = [w]; let k = words.indexOf(w) - 1;
+    while (k >= 0 && Math.abs(words[k].y - w.y) < 2 && w.x0 - words[k].x1 < 6 && !/:$/.test(words[k].t) && !/_/.test(words[k].t)){ ws.unshift(words[k]); k--; }
+    const label = ws.map(x => x.t).join(" ").replace(/:$/, "");
+    if (NO.test(label) || out.some(o => o.label === label)) continue;
+    if (words.some(x => /_{3,}/.test(x.t) && Math.abs(x.y - w.y) < 3 && x.x0 >= w.x1 - 2 && x.x0 - w.x1 < 25)) continue;
+    const u = words.find(x => /^_{3,}$/.test(x.t) && !usados.has(x) && x.y > w.y && x.y - w.y < 12 && x.x0 > ws[0].x0 - 10 && x.x0 < w.x1 + 25 && x.x1 > w.x1);
+    if (!u) continue;
+    // la raya quedó una línea más abajo: se borra y se dibuja una nueva al lado de la etiqueta
+    const V = (lines && lines.v) || [], Hs = Array.isArray(lines) ? lines.filter(l => !l.v && !l.big) : [];
+    let borde = V.filter(v => v.x > w.x1 + 4 && v.y0 <= w.y + 2 && v.y1 >= u.y - 2).map(v => v.x).sort((a,b)=>a-b)[0];
+    const hb = Hs.filter(l => l.y > u.y && l.y - u.y < 20 && l.x0 < w.x0 && l.x1 > w.x1 + 20).sort((a,b)=>a.y-b.y)[0];
+    if (hb && (borde === undefined || hb.x1 < borde)) borde = hb.x1;
+    const R = Math.min(u.x1, borde !== undefined ? borde - 3 : u.x1, W - 20);
+    usados.add(u); out.push({ key: sinTilde(label).toLowerCase(), label, x0: w.x1 + 4, x1: R, y: w.y, lineY: w.y + 2.2,
+      mover: { x0: u.x0 - 2, x1: Math.min(R + 2, borde !== undefined ? borde - 1 : R + 2), y: u.y } });
+  }
+  return out;
+}
+
 function detectOtBox(words){
   const ot = words.find((w,i) => /^OT:?$/i.test(w.t) && sameLine(words, w.y, 2).some(x => /^Indicar$/i.test(x.t) && x.x0 < w.x0));
   return ot ? { x: ot.x1 + 6, base: ot.base, fh: ot.fh } : null;
@@ -637,6 +745,10 @@ function drawAnnotations(ctx, P, s, guides, final){
   OT_SEMILLA = String(S.ot || S.file || "");
   fijarEstilo(S.estilo || (typeof perfil !== "undefined" && perfil.estilo));
   ctx.save();
+  if (P.datos) for (const d of P.datos){
+    if (d.mover){ const mv = d.mover; ctx.fillStyle = "#ffffff"; ctx.fillRect(mv.x0*s, (mv.y - 3.5)*s, (mv.x1 - mv.x0)*s, 8*s);
+      ctx.strokeStyle = "#222"; ctx.lineWidth = Math.max(1, 0.6*s); ctx.beginPath(); ctx.moveTo(d.x0*s, d.lineY*s); ctx.lineTo(d.x1*s, d.lineY*s); ctx.stroke(); }
+    const v = (S.datos || {})[d.key]; if (v) fitText(ctx, v, d.x0 + 2, d.y - 1.8, d.x1 - d.x0 - 4, s, 7, COLOR.blue, "left"); }
   if (P.otBox && S.ot) fitText(ctx, S.ot, P.otBox.x, P.otBox.base - P.otBox.fh*0.35, 90, s, 8, COLOR.white, "left", true);
 
   if (P.checklist){
@@ -655,6 +767,13 @@ function drawAnnotations(ctx, P, s, guides, final){
       if (r.medidas) r.medidas.forEach(m => { const v = S.medidas && S.medidas[key + "#" + m.id];
         if (v) fitText(ctx, v + (m.unidad && !/[a-z°Ω]/i.test(v) ? " " + m.unidad : ""), m.x0 + 1, m.y - 1.6, m.x1 - m.x0 + 12, s, 6.4, COLOR.blue, "left", true);
         else if (guides){ ctx.setLineDash([2,2]); ctx.strokeStyle="rgba(15,94,168,.45)"; ctx.lineWidth=1; ctx.strokeRect(m.x0*s, (m.y-5)*s, (m.x1-m.x0)*s, 8*s); ctx.setLineDash([]); } });
+      if (cl.obsCol && c.estado === "CD"){
+        const fo = typeof fotosDef === "function" ? fotosDef(key).map(id => infoFoto(id).obs).filter(Boolean) : [];
+        const tx = [(c.detalle || "").trim()].concat(fo).filter(Boolean).join(" · ");
+        if (tx){ const ow = cl.obsCol.r - cl.obsCol.l - 4, fs = 5.6; ctx.save(); ctx.font = `${fs*s}px Arial`;
+          const ln = wrap(ctx, tx, ow*s).slice(0, Math.max(1, Math.floor((r.bottom - r.top) / (fs*1.15)))); ctx.restore();
+          ln.forEach((l, j) => fitText(ctx, l, cl.obsCol.l + 2, r.y - (ln.length - 1) * fs * 0.575 + j * fs * 1.15, ow, s, fs, COLOR.blue, "left")); }
+      }
       for (const col of cl.cols){
         if (guides){ ctx.setLineDash([3,3]); ctx.strokeStyle="rgba(15,94,168,.35)"; ctx.lineWidth=1; ctx.strokeRect((col.l+1.5)*s, (r.y-h/2+1.5)*s, (col.w-3)*s, (h-3)*s); ctx.setLineDash([]); }
         if (c[col.g] === col.k) drawCheck(ctx, col.x*s, r.y*s, Math.min(12, h*0.7)*s, (col.k==="CD" || (col.g==="sub" && col.k!=="NO" && col.k!=="NA")) ? COLOR.red : COLOR.blue);
@@ -730,7 +849,7 @@ function drawAnnotations(ctx, P, s, guides, final){
     S.resp.slice(0, R.rows.length).forEach((p,i) => {
       const y = R.rows[i].y;
       if (p.nombre) fitText(ctx, p.nombre, (R.nombre.l+R.nombre.r)/2, y, R.nombre.r-R.nombre.l-6, s, 7.5, COLOR.blue, "center");
-      if (p.cargo) fitText(ctx, p.cargo, (R.cargo.l+R.cargo.r)/2, y, R.cargo.r-R.cargo.l-6, s, 7.5, COLOR.blue, "center");
+      if (p.cargo && R.cargo.r - R.cargo.l > 10) fitText(ctx, p.cargo, (R.cargo.l+R.cargo.r)/2, y, R.cargo.r-R.cargo.l-6, s, 7.5, COLOR.blue, "center");
       if (p.sig){ const im = getImg(p.sig); if (im.complete && im.naturalWidth){
         // grande, como en papel: sobresale 40 % arriba y 40 % abajo de la casilla, centrada y algo inclinada
         const maxH = R.rowH*1.8, maxW = (R.firma.r-R.firma.l)*1.6; let h = maxH, w = h*im.naturalWidth/im.naturalHeight; if (w > maxW){ w = maxW; h = w*im.naturalHeight/im.naturalWidth; }
